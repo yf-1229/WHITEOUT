@@ -1,0 +1,163 @@
+# 開発者向け手順
+
+対象プロジェクトは Unity 6 + OpenXR の Quest 2 向けプロトタイプです。Unity の最低バージョンとOpenXR推奨構成は [Meta公式Unity要件](https://developers.meta.com/horizon/documentation/unity/unity-development-requirements/) に合わせます。
+
+## 1. 開発環境
+
+### 必要なもの
+
+- Unity Hub
+- Unity `6000.0.66f2` 以降
+- Android Build Support、Android SDK & NDK Tools、OpenJDK
+- Meta Quest 2
+- USB-Cデータケーブル
+- Meta Quest Developer Hub（MQDH）またはADB
+- Meta開発者アカウントとDeveloper Modeを有効にしたQuest
+
+### プロジェクト設定
+
+1. Unityで `/home/yuta/Documents/drone` を開く。
+2. Package Managerの依存パッケージ解決が完了するまで待つ。
+3. `Edit > Project Settings > XR Plug-in Management` を開く。
+4. AndroidタブでOpenXRを有効化する。
+5. OpenXR Interaction Profilesへ `Oculus Touch Controller Profile` を追加する。
+6. `Edit > Project Settings > Player > Other Settings` で以下を設定する。
+   - Scripting Backend：`IL2CPP`
+   - Target Architectures：`ARM64`のみ
+   - Package Name：例 `com.yourstudio.dronejobs`
+   - Minimum API Level：使用するUnity/Meta要件に合わせる
+7. `Edit > Project Settings > Player > Resolution and Presentation` で縦向き固定を解除し、VR向け設定を確認する。
+
+Metaの公開向けUnity設定でもIL2CPPとARM64が要求されます。[Prepare Your App for Publishing](https://developers.meta.com/horizon/documentation/unity/unity-prepare-for-publish/)
+
+## 2. 実機ビルド
+
+### Questの準備
+
+1. QuestモバイルアプリでDeveloper Modeを有効にする。
+2. ヘッドセットを起動し、USBデバッグ許可を承認する。
+3. MQDHでQuestが接続済みになっていることを確認する。
+
+### UnityからBuild & Run
+
+1. `File > Build Profiles` を開く。
+2. Androidプロファイルを選択し、`Assets/Scenes/Prototype.unity` をScenes In Buildへ追加する。
+3. `Run Device` に接続中のQuest 2を選択する。
+4. `Build And Run` を実行する。
+5. Questのアプリ一覧から起動し、下記の実機確認を行う。
+
+### APKを手動インストールする場合
+
+```bash
+adb devices
+adb install -r Builds/DroneJobsVR.apk
+adb shell monkey -p com.yourstudio.dronejobs 1
+```
+
+`adb devices` が `unauthorized` の場合は、ヘッドセット内のUSBデバッグ許可を再承認する。複数端末がある場合は `adb -s <serial>` を付ける。
+
+## 3. VR表示確認チェックリスト
+
+### 起動・トラッキング
+
+- 起動直後にカメラが床へ埋まらない
+- `QuestPoseDriver` により頭部の位置・回転が反映される
+- 座位と立位の両方で視線が自然な高さになる
+- Guardian境界や実空間を確認できる
+- 画面の文字とFPVモニターが視野内に収まる
+
+### 操作
+
+- A：配送、X：捜索救助
+- Y：待機中は操作モード切替、飛行中はサーマル切替
+- 右スティック押し込み：建物点検
+- 右グリップ：操縦者、フルFPV、三人称追従を切り替える
+- 左スティック：高度・ヨー
+- 右スティック：前後・左右
+- 右トリガー：荷物投下／遭難者報告
+- B：自動帰還・着陸、着陸後にもう一度押すと離陸
+- キーボード検証時はREADMEのキー割り当てを使う
+
+### ミッション
+
+- 配送：荷物を指定地点へ投下し、発着地点へ戻って着陸できる
+- 帰還：発着地点の発光リングへ自動着陸してプロペラが止まり、Bで再離陸できる
+- 救助：対象付近で3秒静止し、位置報告後に帰還できる
+- 点検：タワーの3設備を近距離で記録し、帰還できる
+- 誤投下・誤報が即クラッシュにならず減点される
+- 強い衝突、電池切れで失敗画面になる
+- リトライで位置、荷物、電池、スコアが初期化される
+- 操作モード別のベストスコアが保存される
+
+### 快適性・性能
+
+- 操縦者視点では10分連続プレイしてもカメラが不必要に移動しない
+- フルFPVと三人称追従で周辺の固定フレームが表示され、右グリップで即座に操縦者視点へ戻せる
+- `Window > Analysis > Profiler` のAndroid接続で72fpsを概ね維持する
+- 操縦者視点ではFPV RenderTextureが30fpsで更新され、他視点では不要な描画が停止する
+- Quest 2で発熱、メモリ増加、音切れがない
+
+UnityエディタのGameビューはQuest実機の代替にならない。最終確認は必ずQuest 2で行う。
+
+## 4. リリース用ビルド
+
+1. `Development Build` と `Script Debugging` を無効化する。
+2. Android Package Nameを一度決めたら変更しない。
+3. Keystoreを作成し、パスワードとファイルを安全にバックアップする。
+4. Version、Bundle Version Codeを更新する。更新ごとにVersion Codeを増やす。
+5. Release APKまたはAABを生成する。
+6. MQDHまたはMetaのアップロード手段でALPHAへアップロードする。
+7. Quest実機でクリーンインストール、更新インストール、アンインストール後の再起動を確認する。
+
+Keystoreを紛失すると同じアプリを更新できなくなるため、リポジトリへコミットしない。MetaもQuest公開には署名用Keystoreが必須と説明しています。[Required app configuration](https://developers.meta.com/horizon/resources/publish-overview-appID/)
+
+## 5. Meta Horizon Store申請
+
+### 申請前の準備
+
+- Meta Horizon Developer Dashboardで組織を作成・認証する
+- `Create a New App` でMeta Horizon Store向けアプリを作成する
+- App IDとPackage NameをUnity側の設定と一致させる
+- 開発者連絡先、Webサイト、プライバシーポリシーURLを用意する
+- アプリアイコン、カバー画像、スクリーンショット、紹介動画を用意する
+- 日本語の短文説明、長文説明、検索キーワードを用意する
+- Category、Genre、Game Modes、Supported Controllers、Play Area、Comfort Levelを記入する
+- IARCコンテンツレーティングを取得する
+- 使用する権限とデータ収集を確認し、Data Use Checkupを完了する
+
+メタデータの入力項目と文字数制限は [Providing App Metadata](https://developers.meta.com/horizon/resources/publish-app-metadata/) を確認する。
+
+### テスト配布
+
+1. Dashboardの `Distribution > Release Channels` を開く。
+2. ALPHAへ開発者ビルドをアップロードする。
+3. テスターをメール、エイリアス、招待URLで追加する。
+4. 問題がなければBETA、次にRCへ昇格する。
+5. 各チャンネルでもパッケージ要件を満たすRelease署名ビルドを使う。
+
+Release Channelsの仕様は [Meta公式Release Channels](https://developers.meta.com/horizon/resources/publish-release-channels/) に従う。
+
+### 本申請
+
+1. Productionチャンネルへ最終ビルドをコピーする。
+2. DashboardのApp Submissionで全項目を入力する。
+3. 価格、対応言語、コンテンツレーティング、Storeアセットを確認する。
+4. VRC（Virtual Reality Checks）とTechnical／Content／Data Protection要件を再確認する。
+5. 警告とエラーを解消し、すべての必須項目にチェックが付いた状態にする。
+6. `Submit for Review` を押す。
+7. 審査期間を見込み、公開希望日の少なくとも2週間前に提出する。
+8. 承認後、即時公開または公開日を設定する。
+
+公式の申請手順は [Submitting your app](https://developers.meta.com/horizon/resources/publish-submit/) を参照する。審査前に本番ビルドやメタデータを変更すると差分管理が難しくなるため、RCで最終確認してからProductionへコピーする。
+
+## 現在のリポジトリの状態
+
+現状は試作APK向けで、Store申請には以下が未設定である。
+
+- 実在のPackage NameとApp ID
+- 署名用Keystore
+- Entitlement Check（有料販売する場合）
+- Store用アセット、プライバシーポリシー、コンテンツレーティング
+- Android向けOpenXR設定の最終確認
+
+本番申請時にこれらを埋め、ALPHA → BETA → RC → Productionの順で進める。
