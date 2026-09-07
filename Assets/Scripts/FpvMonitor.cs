@@ -55,7 +55,7 @@ public sealed class FpvMonitor : MonoBehaviour
     private void Update()
     {
         UpdateGimbal(false);
-        if (fpvCamera != null && panel.activeSelf && Time.unscaledTime >= nextRender)
+        if (!Application.isBatchMode && fpvCamera != null && panel.activeSelf && Time.unscaledTime >= nextRender)
         {
             nextRender = Time.unscaledTime + renderInterval;
             fpvCamera.Render();

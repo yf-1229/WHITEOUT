@@ -11,6 +11,8 @@ dependencies = manifest["dependencies"]
 assert dependencies["com.unity.inputsystem"] == "1.20.0"
 assert dependencies["com.unity.xr.openxr"] == "1.18.0-pre.2"
 assert dependencies["com.unity.render-pipelines.universal"] == "17.6.0"
+assert dependencies["com.unity.modules.terrain"] == "1.0.0"
+assert dependencies["com.unity.modules.particlesystem"] == "1.0.0"
 assert "com.unity.xr.interaction.toolkit" not in dependencies
 assert (ROOT / "Assets/Scenes/Prototype.unity").is_file()
 
@@ -35,15 +37,15 @@ for token in ("digit1Key", "digit2Key", "spaceKey", "GetDeviceAtXRNode", "rightS
     assert token in input_source
 
 types_source = (ROOT / "Assets/Scripts/MissionTypes.cs").read_text()
-for token in ("Inspection", "Operator", "Fpv", "Chase"):
+for token in ("FreeFlight", "StoryStage", "MountainPass", "DeliverSupplies", "ReturnHome", "Operator", "Fpv", "Chase"):
     assert token in types_source
 
 bootstrap_source = (ROOT / "Assets/Scripts/PrototypeBootstrap.cs").read_text()
-for token in ("CreateInspectionTower", "CreateEnvironment", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
+for token in ("CreateMountainTerrain", "TerrainData", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ArtificialHorizon", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
     assert token in bootstrap_source
 
 mission_source = (ROOT / "Assets/Scripts/MissionController.cs").read_text()
-for token in ("GAME OVER", "やり直す", "リタイア"):
+for token in ("FREE FLIGHT", "WHITEOUT", "MISSION COMPLETE", "StoryStage.MountainPass", "StoryStage.DeliverSupplies", "StoryStage.ReturnHome"):
     assert token in mission_source
 
 fpv_source = (ROOT / "Assets/Scripts/FpvMonitor.cs").read_text()
@@ -51,7 +53,7 @@ for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlan
     assert token in fpv_source
 
 drone_source = (ROOT / "Assets/Scripts/DroneController.cs").read_text()
-for token in ("MotorsArmed", "ApplyReturnHome", "ApplyTakeoff"):
+for token in ("MotorsArmed", "ApplyReturnHome", "ApplyTakeoff", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 8f"):
     assert token in drone_source
 
 print("prototype smoke check: ok")

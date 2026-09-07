@@ -1,8 +1,8 @@
 using System;
 
 public enum FlightMode { Assist, Manual }
-public enum MissionType { Delivery, Rescue, Inspection }
-public enum MissionState { Ready, Active, Completed, Failed }
+public enum MissionState { FreeFlight, Active, Completed, Failed }
+public enum StoryStage { MountainPass, DeliverSupplies, ReturnHome }
 public enum ViewMode { Operator, Fpv, Chase }
 
 [Serializable]
