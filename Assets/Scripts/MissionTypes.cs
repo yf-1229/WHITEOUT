@@ -2,7 +2,7 @@ using System;
 
 public enum FlightMode { Assist, Manual }
 public enum MissionState { FreeFlight, Active, Completed, Failed }
-public enum StoryStage { MountainPass, DeliverSupplies, ReturnHome }
+public enum StoryStage { Route, Objective, ReturnHome }
 public enum ViewMode { Operator, Fpv, Chase }
 
 [Serializable]

@@ -11,11 +11,13 @@ public sealed class DroneController : MonoBehaviour
     public float yawTorque = 1.8f;
     public float maxHorizontalSpeed = 8f;
     public float batterySeconds = 360f;
+    public float geofenceWarningDistance = 330f;
+    public float geofenceReturnDistance = 390f;
 
     public float BatteryPercent => batterySeconds / initialBatterySeconds * 100f;
     public int CollisionCount { get; private set; }
     public bool Crashed { get; private set; }
-    public bool MotorsArmed { get; private set; } = true;
+    public bool MotorsArmed { get; private set; }
     public bool ReturningHome { get; private set; }
     public bool GeofenceWarning { get; private set; }
     public Vector3 Wind { get; private set; }
@@ -24,7 +26,6 @@ public sealed class DroneController : MonoBehaviour
     private Rigidbody body;
     private float initialBatterySeconds;
     private float targetAltitude;
-    private bool takingOff;
     private Vector3 homePosition;
     private float returnAltitude;
     private const float CrashSpeed = 6f;
@@ -39,11 +40,11 @@ public sealed class DroneController : MonoBehaviour
         body.angularDamping = 0.6f;
         initialBatterySeconds = batterySeconds;
         homePosition = transform.position;
-        returnAltitude = homePosition.y + 6f;
+        returnAltitude = homePosition.y + 45f;
         targetAltitude = transform.position.y;
     }
 
-    public void BeginMission(Vector3 home)
+    public void ResetToIdle(Vector3 home)
     {
         homePosition = home;
         body.position = home + Vector3.up * 0.42f;
@@ -54,11 +55,16 @@ public sealed class DroneController : MonoBehaviour
         targetAltitude = home.y + 0.8f;
         CollisionCount = 0;
         Crashed = false;
-        MotorsArmed = true;
+        MotorsArmed = false;
         ReturningHome = false;
-        returnAltitude = home.y + 6f;
-        takingOff = false;
+        returnAltitude = home.y + 45f;
         GeofenceWarning = false;
+    }
+
+    public void BeginMission(Vector3 home)
+    {
+        ResetToIdle(home);
+        MotorsArmed = true;
     }
 
     public void SetWind(Vector3 wind) => Wind = wind;
@@ -68,14 +74,13 @@ public sealed class DroneController : MonoBehaviour
         if (Crashed || !QuestInput.Current.rightSecondaryDown) return;
         if (MotorsArmed)
         {
-            takingOff = false;
-            returnAltitude = Mathf.Max(transform.position.y, homePosition.y + 6f);
+            returnAltitude = Mathf.Max(transform.position.y, homePosition.y + 45f);
             ReturningHome = true;
         }
         else
         {
             MotorsArmed = true;
-            takingOff = true;
+            ReturningHome = false;
             targetAltitude = homePosition.y + 1.2f;
             body.WakeUp();
             QuestInput.PulseRight(0.35f, 0.12f);
@@ -92,10 +97,10 @@ public sealed class DroneController : MonoBehaviour
         var right = Vector2.ClampMagnitude(input.rightStick, 1f);
         var throttle = Mathf.Abs(left.y);
         var homeDistance = Vector3.Distance(transform.position, homePosition);
-        GeofenceWarning = homeDistance > 80f;
-        if (homeDistance > 100f && !ReturningHome)
+        GeofenceWarning = homeDistance > geofenceWarningDistance;
+        if (homeDistance > geofenceReturnDistance && !ReturningHome)
         {
-            returnAltitude = Mathf.Max(transform.position.y, homePosition.y + 6f);
+            returnAltitude = Mathf.Max(transform.position.y, homePosition.y + 45f);
             ReturningHome = true;
         }
 
@@ -108,8 +113,7 @@ public sealed class DroneController : MonoBehaviour
             return;
         }
 
-        if (takingOff) ApplyTakeoff();
-        else if (ReturningHome) ApplyReturnHome();
+        if (ReturningHome) ApplyReturnHome();
         else ApplyFlight(left, right, dt);
         if (!MotorsArmed) return;
         body.AddForce(Wind, ForceMode.Acceleration);
@@ -127,7 +131,7 @@ public sealed class DroneController : MonoBehaviour
         if (flightMode == FlightMode.Assist)
         {
             if (Mathf.Abs(left.y) > 0.05f)
-                targetAltitude = Mathf.Clamp(targetAltitude + left.y * verticalSpeed * dt, homePosition.y + 0.25f, homePosition.y + 24f);
+                targetAltitude = Mathf.Clamp(targetAltitude + left.y * verticalSpeed * dt, homePosition.y + 0.25f, homePosition.y + 75f);
             var verticalError = targetAltitude - transform.position.y;
             body.AddForce(Vector3.up * (verticalError * altitudeGain - body.linearVelocity.y * 4f), ForceMode.Acceleration);
             StabilizeAttitude();
@@ -148,9 +152,9 @@ public sealed class DroneController : MonoBehaviour
     {
         var delta = homePosition - transform.position;
         var planar = new Vector3(delta.x, 0f, delta.z);
-        var target = planar.magnitude > 8f
+        var target = planar.magnitude > 20f
             ? returnAltitude
-            : Mathf.Lerp(homePosition.y + 0.2f, returnAltitude, planar.magnitude / 8f);
+            : Mathf.Lerp(homePosition.y + 0.2f, returnAltitude, planar.magnitude / 20f);
         body.AddForce(planar * 1.8f - new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z) * 1.2f, ForceMode.Acceleration);
         var verticalError = target - transform.position.y;
         body.AddForce(Vector3.up * (verticalError * altitudeGain - body.linearVelocity.y * 4f), ForceMode.Acceleration);
@@ -161,13 +165,6 @@ public sealed class DroneController : MonoBehaviour
         body.linearVelocity = Vector3.zero;
         body.angularVelocity = Vector3.zero;
         QuestInput.PulseRight(0.2f, 0.1f);
-    }
-
-    private void ApplyTakeoff()
-    {
-        body.AddForce(Vector3.up * ((targetAltitude - transform.position.y) * altitudeGain - body.linearVelocity.y * 4f), ForceMode.Acceleration);
-        StabilizeAttitude();
-        if (transform.position.y >= 1.1f) takingOff = false;
     }
 
     private void StabilizeAttitude()

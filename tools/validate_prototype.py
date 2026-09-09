@@ -1,6 +1,8 @@
 """Small dependency-free smoke check for the generated Unity prototype."""
 
 import json
+import math
+import re
 from pathlib import Path
 
 
@@ -37,23 +39,49 @@ for token in ("digit1Key", "digit2Key", "spaceKey", "GetDeviceAtXRNode", "rightS
     assert token in input_source
 
 types_source = (ROOT / "Assets/Scripts/MissionTypes.cs").read_text()
-for token in ("FreeFlight", "StoryStage", "MountainPass", "DeliverSupplies", "ReturnHome", "Operator", "Fpv", "Chase"):
+for token in ("FreeFlight", "StoryStage", "Route", "Objective", "ReturnHome", "Operator", "Fpv", "Chase"):
     assert token in types_source
 
+catalog_source = (ROOT / "Assets/Scripts/StoryCatalog.cs").read_text()
+story_codes = re.findall(r'S\("(\d{2})",', catalog_source)
+assert len(story_codes) == 24
+assert len(set(story_codes)) == len(story_codes)
+assert story_codes == [f"{number:02}" for number in range(1, 25)]
+for token in ("StoryAction.Deliver", "StoryAction.Scan", "StoryAction.Relay", "StoryAction.Mark", "holdSeconds"):
+    assert token in catalog_source
+sites = [(24, 90), (102, 186), (-102, 204), (150, 60), (-156, 120), (-15, 258), (162, 225), (-90, 54)]
+routes = [tuple(map(int, route)) for route in re.findall(r"StoryAction\.\w+, (\d), (\d), (\d),", catalog_source)]
+assert len(routes) == len(story_codes)
+estimated_durations = []
+for route in routes:
+    points = [(0, -4), *(sites[index] for index in route), (0, -4)]
+    estimated_seconds = sum(math.dist(start, end) for start, end in zip(points, points[1:])) / 2.7 + 20
+    estimated_durations.append(estimated_seconds)
+    assert 210 <= estimated_seconds <= 370, (route, estimated_seconds)
+
 bootstrap_source = (ROOT / "Assets/Scripts/PrototypeBootstrap.cs").read_text()
-for token in ("CreateMountainTerrain", "TerrainData", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ArtificialHorizon", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
+for token in ("CreateMountainTerrain", "TerrainData", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ArtificialHorizon", "missionSites", "FrozenLake", "OldMineEntrance", "WeatherStation", "ForestShelter", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
     assert token in bootstrap_source
 
 mission_source = (ROOT / "Assets/Scripts/MissionController.cs").read_text()
-for token in ("FREE FLIGHT", "WHITEOUT", "MISSION COMPLETE", "StoryStage.MountainPass", "StoryStage.DeliverSupplies", "StoryStage.ReturnHome"):
+for token in ("STORY FLIGHT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "MOTORS OFF / B ARM", "NAV {navigation}", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
     assert token in mission_source
+assert mission_source.count("drone.BeginMission(homePad.position);") == 3
+active_flow = mission_source.split("else if (State == MissionState.Active)", 1)[1].split("else if (input.rightPrimaryDown)", 1)[0]
+assert "input.leftPrimaryDown" in active_flow and "Time.unscaledTime < abortConfirmationUntil" in active_flow and "EnterFreeFlight();" in active_flow
+start_story = mission_source.split("private void StartStory()", 1)[1].split("private void UpdateStory", 1)[0]
+enter_idle = mission_source.split("private void EnterFreeFlight()", 1)[1].split("private void CompleteStory", 1)[0]
+assert "drone.BeginMission(homePad.position);" in start_story
+assert "drone.BeginMission(homePad.position);" in enter_idle
 
 fpv_source = (ROOT / "Assets/Scripts/FpvMonitor.cs").read_text()
 for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlane"):
     assert token in fpv_source
 
 drone_source = (ROOT / "Assets/Scripts/DroneController.cs").read_text()
-for token in ("MotorsArmed", "ApplyReturnHome", "ApplyTakeoff", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 8f"):
+for token in ("MotorsArmed", "ResetToIdle", "ApplyReturnHome", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
     assert token in drone_source
+assert "public bool MotorsArmed { get; private set; }\n" in drone_source
+assert drone_source.count("MotorsArmed = true;") == 2
 
-print("prototype smoke check: ok")
+print(f"prototype smoke check: {len(story_codes)} stories, {min(estimated_durations) / 60:.1f}-{max(estimated_durations) / 60:.1f} min, ok")

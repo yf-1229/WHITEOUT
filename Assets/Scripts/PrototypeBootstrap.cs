@@ -21,16 +21,32 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 
         var terrain = CreateMountainTerrain();
         var homePosition = OnTerrain(terrain, new Vector3(0f, 0f, -4f)) + Vector3.up * 0.05f;
-        var passPosition = OnTerrain(terrain, new Vector3(8f, 0f, 30f)) + Vector3.up * 5f;
-        var campPosition = OnTerrain(terrain, new Vector3(34f, 0f, 62f)) + Vector3.up * 0.05f;
+        var groundSites = new[]
+        {
+            OnTerrain(terrain, new Vector3(24f, 0f, 90f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(102f, 0f, 186f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(-102f, 0f, 204f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(150f, 0f, 60f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(-156f, 0f, 120f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(-15f, 0f, 258f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(162f, 0f, 225f)) + Vector3.up * 0.05f,
+            OnTerrain(terrain, new Vector3(-90f, 0f, 54f)) + Vector3.up * 0.05f
+        };
         var camera = CreateViewer(homePosition + new Vector3(0f, 1.55f, -6f));
 
         CreateLighting();
-        CreateAlpineEnvironment(terrain, homePosition, campPosition);
+        CreateAlpineEnvironment(terrain, homePosition, groundSites);
         var homePad = CreateLandingLight("HomeBase", homePosition, 2.2f, Cyan);
-        var mountainPass = CreateLandingLight("MountainPass", passPosition, 2.8f, Cyan);
-        var deliveryZone = CreateLandingLight("RescueCamp", campPosition, 3.2f, Orange);
-        var rescueTarget = CreateRescueTarget(campPosition + new Vector3(2.4f, 0.9f, 1.5f));
+        var sitePositions = (Vector3[])groundSites.Clone();
+        sitePositions[0] += Vector3.up * 5f;
+        sitePositions[2] += Vector3.up * 4f;
+        sitePositions[6] += Vector3.up * 2f;
+        var siteNames = new[] { "MountainPass", "RescueCamp", "RadioRidge", "FrozenLake", "OldMine", "WeatherStation", "AvalancheShelf", "ForestShelter" };
+        var siteColors = new[] { Cyan, Orange, Cyan, new Color(0.3f, 0.65f, 1f), new Color(1f, 0.7f, 0.15f), Color.green, Orange, new Color(0.7f, 0.4f, 1f) };
+        var missionSites = new Transform[sitePositions.Length];
+        for (var i = 0; i < missionSites.Length; i++)
+            missionSites[i] = CreateLandingLight(siteNames[i], sitePositions[i], 2.8f, siteColors[i]).transform;
+        var rescueTarget = CreateRescueTarget(groundSites[1] + new Vector3(2.4f, 0.9f, 1.5f));
 
         var drone = CreateDrone(homePosition + Vector3.up * 0.42f);
         var package = CreatePackage(drone.transform);
@@ -50,8 +66,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         missions.fpv = monitor;
         missions.views = views;
         missions.homePad = homePad.transform;
-        missions.mountainPass = mountainPass.transform;
-        missions.deliveryZone = deliveryZone.transform;
+        missions.missionSites = missionSites;
         missions.package = package.transform;
         missions.statusText = status;
         missions.telemetryText = telemetry;
@@ -61,26 +76,26 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 
     private static Terrain CreateMountainTerrain()
     {
-        const int resolution = 129;
+        const int resolution = 257;
         var data = new TerrainData
         {
             heightmapResolution = resolution,
             alphamapResolution = 64,
-            size = new Vector3(180f, 34f, 180f)
+            size = new Vector3(540f, 70f, 540f)
         };
         var heights = new float[resolution, resolution];
         for (var z = 0; z < resolution; z++)
         for (var x = 0; x < resolution; x++)
         {
-            var worldX = x / (resolution - 1f) * 180f - 90f;
-            var worldZ = z / (resolution - 1f) * 180f - 35f;
-            var north = Mathf.InverseLerp(-25f, 130f, worldZ);
+            var worldX = x / (resolution - 1f) * 540f - 270f;
+            var worldZ = z / (resolution - 1f) * 540f - 105f;
+            var north = Mathf.InverseLerp(-75f, 390f, worldZ);
             var broad = Mathf.PerlinNoise(x * 0.035f + 2.1f, z * 0.035f + 7.3f);
             var fine = Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 3f);
             var ridges = 1f - Mathf.Abs(Mathf.PerlinNoise(x * 0.055f, z * 0.055f) * 2f - 1f);
             var height = 0.025f + north * north * 0.34f + broad * 0.08f + fine * 0.018f + ridges * north * 0.07f;
-            height = Flatten(height, worldX, worldZ, 0f, -4f, 13f, 0.035f);
-            height = Flatten(height, worldX, worldZ, 34f, 62f, 11f, 0.39f);
+            height = Flatten(height, worldX, worldZ, 0f, -4f, 24f, 0.035f);
+            height = Flatten(height, worldX, worldZ, 102f, 186f, 25f, 0.39f);
             heights[z, x] = Mathf.Clamp01(height);
         }
         data.SetHeights(0, 0, heights);
@@ -106,7 +121,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 
         var terrainObject = Terrain.CreateTerrainGameObject(data);
         terrainObject.name = "ProceduralSnowMountain";
-        terrainObject.transform.position = new Vector3(-90f, 0f, -35f);
+        terrainObject.transform.position = new Vector3(-270f, 0f, -105f);
         var terrain = terrainObject.GetComponent<Terrain>();
         terrain.drawInstanced = true;
         terrain.detailObjectDistance = 45f;
@@ -195,7 +210,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         camera.clearFlags = CameraClearFlags.SolidColor;
         camera.backgroundColor = new Color(0.43f, 0.5f, 0.56f);
         camera.nearClipPlane = 0.03f;
-        camera.farClipPlane = 260f;
+        camera.farClipPlane = 720f;
         viewer.AddComponent<AudioListener>();
         var pose = viewer.AddComponent<QuestPoseDriver>();
         pose.trackingOrigin = origin;
@@ -220,21 +235,21 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         RenderSettings.ambientGroundColor = new Color(0.14f, 0.16f, 0.18f);
     }
 
-    private static void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3 camp)
+    private static void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3[] sites)
     {
         // ponytail: primitive LOD scenery is the Quest-safe ceiling; swap in authored terrain/tree LODs when the art direction is funded.
         var random = new System.Random(2187);
         for (var i = 0; i < 34; i++)
         {
-            var position = new Vector3((float)random.NextDouble() * 150f - 75f, 0f, (float)random.NextDouble() * 145f - 25f);
+            var position = new Vector3((float)random.NextDouble() * 450f - 225f, 0f, (float)random.NextDouble() * 390f - 75f);
             if (Vector2.Distance(new Vector2(position.x, position.z), new Vector2(home.x, home.z)) < 12f ||
-                Vector2.Distance(new Vector2(position.x, position.z), new Vector2(camp.x, camp.z)) < 12f) continue;
+                Vector2.Distance(new Vector2(position.x, position.z), new Vector2(sites[1].x, sites[1].z)) < 12f) continue;
             position = OnTerrain(terrain, position);
             if (position.y < 14f) CreateFir(position, 0.8f + (float)random.NextDouble() * 0.8f);
         }
         for (var i = 0; i < 20; i++)
         {
-            var position = OnTerrain(terrain, new Vector3((float)random.NextDouble() * 150f - 75f, 0f, (float)random.NextDouble() * 150f - 20f));
+            var position = OnTerrain(terrain, new Vector3((float)random.NextDouble() * 450f - 225f, 0f, (float)random.NextDouble() * 400f - 70f));
             var rock = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             rock.name = "GraniteOutcrop";
             rock.transform.position = position - Vector3.up * 0.2f;
@@ -245,12 +260,17 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         }
 
         CreateBox("BaseHangar", home + new Vector3(-7f, 2.2f, 2f), new Vector3(8f, 4.4f, 7f), new Color(0.18f, 0.22f, 0.26f));
-        CreateBox("RescueCabin", camp + new Vector3(4.5f, 1.6f, 4f), new Vector3(6f, 3.2f, 5f), new Color(0.28f, 0.18f, 0.12f), Quaternion.Euler(0f, -18f, 0f));
-        CreateBox("SnowRoof", camp + new Vector3(4.5f, 3.3f, 4f), new Vector3(6.5f, 0.35f, 5.5f), new Color(0.86f, 0.89f, 0.91f), Quaternion.Euler(0f, -18f, 5f));
-        var antenna = CreateBox("EmergencyAntenna", camp + new Vector3(-2f, 3.5f, 2f), new Vector3(0.12f, 7f, 0.12f), new Color(0.25f, 0.28f, 0.3f));
+        CreateBox("RescueCabin", sites[1] + new Vector3(4.5f, 1.6f, 4f), new Vector3(6f, 3.2f, 5f), new Color(0.28f, 0.18f, 0.12f), Quaternion.Euler(0f, -18f, 0f));
+        CreateBox("SnowRoof", sites[1] + new Vector3(4.5f, 3.3f, 4f), new Vector3(6.5f, 0.35f, 5.5f), new Color(0.86f, 0.89f, 0.91f), Quaternion.Euler(0f, -18f, 5f));
+        var antenna = CreateBox("EmergencyAntenna", sites[2] + Vector3.up * 3.5f, new Vector3(0.12f, 7f, 0.12f), new Color(0.25f, 0.28f, 0.3f));
         Object.Destroy(antenna.GetComponent<Collider>());
+        CreateBox("OldMineEntrance", sites[4] + new Vector3(0f, 1.7f, 2f), new Vector3(5f, 3.4f, 1f), new Color(0.08f, 0.09f, 0.1f));
+        CreateBox("WeatherStation", sites[5] + new Vector3(3f, 1.3f, 2f), new Vector3(4f, 2.6f, 4f), new Color(0.72f, 0.76f, 0.78f));
+        CreateBox("ForestShelter", sites[7] + new Vector3(-3f, 1.2f, 2f), new Vector3(4f, 2.4f, 3.5f), new Color(0.24f, 0.16f, 0.1f));
+        var lake = CreateBox("FrozenLake", sites[3] + Vector3.down * 0.03f, new Vector3(15f, 0.08f, 12f), new Color(0.32f, 0.57f, 0.72f));
+        Object.Destroy(lake.GetComponent<Collider>());
         var flare = new GameObject("EmergencyFlare");
-        flare.transform.position = camp + Vector3.up * 2f;
+        flare.transform.position = sites[1] + Vector3.up * 2f;
         var light = flare.AddComponent<Light>();
         light.type = LightType.Point;
         light.color = Orange;
