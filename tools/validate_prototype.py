@@ -18,6 +18,9 @@ assert dependencies["com.unity.modules.particlesystem"] == "1.0.0"
 assert "com.unity.xr.interaction.toolkit" not in dependencies
 assert (ROOT / "Assets/Scenes/Prototype.unity").is_file()
 
+build_settings = (ROOT / "ProjectSettings/EditorBuildSettings.asset").read_text()
+assert "path: Assets/Scenes/Prototype.unity" in build_settings
+
 scene = (ROOT / "Assets/Scenes/Prototype.unity").read_text()
 assert "--- !u!1660057539 &9223372036854775807\nSceneRoots:" in scene
 assert "GameObject:\n  m_ObjectHideFlags: 0\n  m_CorrespondingSourceObject: {fileID: 0}" in scene
@@ -31,6 +34,20 @@ player_settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text()
 assert "  activeInputHandler: 1\n" in player_settings
 assert "  defaultScreenWidth: 1920\n" in player_settings
 assert "  defaultScreenHeight: 1080\n" in player_settings
+assert "  AndroidMinSdkVersion: 29\n" in player_settings
+assert "  AndroidTargetArchitectures: 2\n" in player_settings
+assert "  scriptingBackend:\n    Android: 1\n" in player_settings
+
+xr_management = (ROOT / "Assets/XR/XRGeneralSettingsPerBuildTarget.asset").read_text()
+assert "m_Name: Android Providers" in xr_management
+assert "m_AutomaticLoading: 1" in xr_management
+assert "guid: 67e84d3d777d151ac9dfec97d4aa0b29" in xr_management
+
+openxr_settings = (ROOT / "Assets/XR/Settings/OpenXR Package Settings.asset").read_text()
+for name in ("MetaQuestFeature Android", "OculusTouchControllerProfile Android", "MetaQuestTouchPlusControllerProfile Android"):
+    section = openxr_settings.split(f"m_Name: {name}", 1)[1].split("---", 1)[0]
+    assert "m_enabled: 1" in section
+assert "visibleName: Quest 3S\n    manifestName: quest3s\n    enabled: 1" in openxr_settings
 
 for script in (ROOT / "Assets/Scripts").glob("*.cs"):
     source = script.read_text()
@@ -104,5 +121,11 @@ assert "body.linearVelocity = new Vector3(horizontal.x" not in drone_source
 
 assert 'camera.clearFlags = CameraClearFlags.Skybox;' in bootstrap_source
 assert 'Shader.Find("Skybox/Procedural")' in bootstrap_source
+
+configurator_source = (ROOT / "Assets/Editor/ProjectConfigurator.cs").read_text()
+assert '"Game preview rendered black"' in configurator_source
+
+view_source = (ROOT / "Assets/Scripts/ViewController.cs").read_text()
+assert "Application.isEditor ? ViewMode.Operator" in view_source
 
 print(f"prototype smoke check: {len(story_codes)} stories, {min(estimated_durations) / 60:.1f}-{max(estimated_durations) / 60:.1f} min, ok")

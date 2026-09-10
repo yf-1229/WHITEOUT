@@ -9,6 +9,7 @@ using UnityEngine.Rendering.Universal;
 public static class ProjectConfigurator
 {
     private const string PipelinePath = "Assets/Settings/QuestUniversalRenderPipeline.asset";
+    private const string ScenePath = "Assets/Scenes/Prototype.unity";
     private static int smokeFrames;
     private static bool smokeFailed;
     private static bool previousFastPlay;
@@ -38,7 +39,7 @@ public static class ProjectConfigurator
 
     public static void SmokePlayMode()
     {
-        EditorSceneManager.OpenScene("Assets/Scenes/Prototype.unity");
+        EditorSceneManager.OpenScene(ScenePath);
         smokeFrames = 0;
         smokeFailed = false;
         previousFastPlay = EditorSettings.enterPlayModeOptionsEnabled;
@@ -99,6 +100,7 @@ public static class ProjectConfigurator
 
         var viewer = Camera.main;
         var fpv = GameObject.Find("FPVCamera").GetComponent<Camera>();
+        CheckPreview(viewer);
         var uiMask = LayerMask.GetMask("UI");
         UnityEngine.Assertions.Assert.AreEqual(0, fpv.cullingMask & uiMask);
         UnityEngine.Assertions.Assert.IsTrue((viewer.cullingMask & uiMask) != 0);
@@ -117,6 +119,30 @@ public static class ProjectConfigurator
         Debug.Log($"RENDER CHECK: renderers={renderers.Length}, materials={materials.Length}, " +
                   $"textures={materials.Where(material => material.HasProperty("_MainTex") || material.HasProperty("_BaseMap")).Select(material => material.mainTexture).Where(texture => texture != null).Distinct().Count()}, " +
                   $"staticBatched={scenery.Length}");
+    }
+
+    private static void CheckPreview(Camera viewer)
+    {
+        var target = RenderTexture.GetTemporary(32, 32, 16);
+        var image = new Texture2D(32, 32, TextureFormat.RGB24, false);
+        var previousActive = RenderTexture.active;
+        var previousTarget = viewer.targetTexture;
+        try
+        {
+            viewer.targetTexture = target;
+            viewer.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0, 0, 32, 32), 0, 0);
+            image.Apply();
+            UnityEngine.Assertions.Assert.IsTrue(image.GetPixels().Any(color => color.maxColorComponent > 0.05f), "Game preview rendered black");
+        }
+        finally
+        {
+            viewer.targetTexture = previousTarget;
+            RenderTexture.active = previousActive;
+            Object.DestroyImmediate(image);
+            RenderTexture.ReleaseTemporary(target);
+        }
     }
 
     private static void CapturePlayError(string message, string stackTrace, LogType type)

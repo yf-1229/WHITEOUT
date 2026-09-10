@@ -20,7 +20,7 @@ public sealed class ViewController : MonoBehaviour
         chasePosition = operatorPosition;
         chaseRotation = operatorRotation;
         comfortFrame = CreateComfortFrame(viewer.transform);
-        SetMode((ViewMode)Mathf.Clamp(PlayerPrefs.GetInt("viewMode", 0), 0, 2));
+        SetMode(Application.isEditor ? ViewMode.Operator : (ViewMode)Mathf.Clamp(PlayerPrefs.GetInt("viewMode", 0), 0, 2));
     }
 
     private void Update()

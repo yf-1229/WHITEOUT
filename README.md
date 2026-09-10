@@ -1,12 +1,12 @@
 # WHITEOUT — Drone Rescue VR
 
-Quest 2向けの雪山ドローン救助ゲームです。現在のXR解像度を維持したまま、機体を傾けて推力を作る飛行モデル、突風、雪山の空と景観を楽しみながら、1話約5分・全24話の物語ミッションへ貢献できます。
+Quest 2 / Quest 3S向けの雪山ドローン救助ゲームです。現在のXR解像度を維持したまま、機体を傾けて推力を作る飛行モデル、突風、雪山の空と景観を楽しみながら、1話約5分・全24話の物語ミッションへ貢献できます。
 
 ## 起動
 
 1. Unity 6 (`6000.0.66f2` 以降)でこのフォルダを開く。
-2. Package Managerの解決を待ち、`Assets/Scenes/Prototype.unity`をPlayする。
-3. QuestではAndroidのOpenXRとOculus Touch Controller Profileを有効にする。
+2. Package Managerの解決を待ち、`Assets/Scenes/Prototype.unity`をPlayする。Gameビューは常に操縦者視点から始まり、ヘッドセットなしでもキーボードで確認できる。
+3. Quest向けのOpenXR、Meta Quest Support、Quest 2 / 3Sのコントローラープロファイルは設定済み。
 
 ## ゲーム
 

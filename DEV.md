@@ -1,6 +1,6 @@
 # 開発者向け手順
 
-対象プロジェクトは Unity 6 + OpenXR の Quest 2 向け雪山救助プロトタイプです。Unity の最低バージョンとOpenXR推奨構成は [Meta公式Unity要件](https://developers.meta.com/horizon/documentation/unity/unity-development-requirements/) に合わせます。
+対象プロジェクトは Unity 6 + OpenXR の Quest 2 / Quest 3S 向け雪山救助プロトタイプです。Unity の最低バージョンとOpenXR推奨構成は [Meta公式Unity要件](https://developers.meta.com/horizon/documentation/unity/unity-development-requirements/) に合わせます。
 
 ## 1. 開発環境
 
@@ -9,7 +9,7 @@
 - Unity Hub
 - Unity `6000.0.66f2` 以降
 - Android Build Support、Android SDK & NDK Tools、OpenJDK
-- Meta Quest 2
+- Meta Quest 2またはMeta Quest 3S
 - USB-Cデータケーブル
 - Meta Quest Developer Hub（MQDH）またはADB
 - Meta開発者アカウントとDeveloper Modeを有効にしたQuest
@@ -18,15 +18,8 @@
 
 1. Unityで `/home/yuta/Documents/drone` を開く。
 2. Package Managerの依存パッケージ解決が完了するまで待つ。
-3. `Edit > Project Settings > XR Plug-in Management` を開く。
-4. AndroidタブでOpenXRを有効化する。
-5. OpenXR Interaction Profilesへ `Oculus Touch Controller Profile` を追加する。
-6. `Edit > Project Settings > Player > Other Settings` で以下を設定する。
-   - Scripting Backend：`IL2CPP`
-   - Target Architectures：`ARM64`のみ
-   - Package Name：例 `com.yourstudio.dronejobs`
-   - Minimum API Level：使用するUnity/Meta要件に合わせる
-7. `Edit > Project Settings > Player > Resolution and Presentation` で縦向き固定を解除し、VR向け設定を確認する。
+3. `Edit > Project Settings > XR Plug-in Management` を開き、AndroidにOpenXR、Meta Quest Support、`Oculus Touch Controller Profile`、`Meta Quest Touch Plus Controller Profile`が有効なことを確認する。これらとIL2CPP、ARM64、API 29、横向きは設定済み。
+4. `Edit > Project Settings > Player > Other Settings` でPackage Name（例 `com.yourstudio.dronejobs`）を設定する。
 
 Metaの公開向けUnity設定でもIL2CPPとARM64が要求されます。[Prepare Your App for Publishing](https://developers.meta.com/horizon/documentation/unity/unity-prepare-for-publish/)
 
@@ -41,8 +34,8 @@ Metaの公開向けUnity設定でもIL2CPPとARM64が要求されます。[Prepa
 ### UnityからBuild & Run
 
 1. `File > Build Profiles` を開く。
-2. Androidプロファイルを選択し、`Assets/Scenes/Prototype.unity` をScenes In Buildへ追加する。
-3. `Run Device` に接続中のQuest 2を選択する。
+2. Androidプロファイルを選択し、`Assets/Scenes/Prototype.unity` がScenes In Buildに含まれていることを確認する。
+3. `Run Device` に接続中のQuest 2またはQuest 3Sを選択する。
 4. `Build And Run` を実行する。
 5. Questのアプリ一覧から起動し、下記の実機確認を行う。
 
@@ -104,9 +97,9 @@ adb shell monkey -p com.yourstudio.dronejobs 1
 - `Window > Analysis > Profiler` のAndroid接続で72fpsを概ね維持する
 - Terrainの草、針葉樹、吹雪が左右の目で破綻せず、強い吹雪でも72fpsを概ね維持する
 - 操縦者視点ではFPV RenderTextureが30fpsで更新され、他視点では不要な描画が停止する
-- Quest 2で発熱、メモリ増加、音切れがない
+- Quest 2 / Quest 3Sで発熱、メモリ増加、音切れがない
 
-UnityエディタのGameビューはQuest実機の代替にならない。最終確認は必ずQuest 2で行う。
+UnityエディタのGameビューはQuest実機の代替にならない。最終確認は必ず対象のQuest 2 / Quest 3Sで行う。
 
 ### 画質を維持する描画最適化
 
