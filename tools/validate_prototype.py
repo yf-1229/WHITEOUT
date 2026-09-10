@@ -41,7 +41,7 @@ for token in ("digit1Key", "digit2Key", "spaceKey", "GetDeviceAtXRNode", "rightS
     assert token in input_source
 
 types_source = (ROOT / "Assets/Scripts/MissionTypes.cs").read_text()
-for token in ("FreeFlight", "StoryStage", "Route", "Objective", "ReturnHome", "Operator", "Fpv", "Chase"):
+for token in ("FreeFlight", "StoryStage", "Route", "Objective", "ReturnHome", "Operator", "Fpv", "Chase", "pilotStyle"):
     assert token in types_source
 
 catalog_source = (ROOT / "Assets/Scripts/StoryCatalog.cs").read_text()
@@ -54,6 +54,12 @@ for token in ("StoryAction.Deliver", "StoryAction.Scan", "StoryAction.Relay", "S
 sites = [(24, 90), (102, 186), (-102, 204), (150, 60), (-156, 120), (-15, 258), (162, 225), (-90, 54)]
 routes = [tuple(map(int, route)) for route in re.findall(r"StoryAction\.\w+, (\d), (\d), (\d),", catalog_source)]
 assert len(routes) == len(story_codes)
+for story_index, route in enumerate(routes):
+    distress_site = (route[2] + story_index + 1) % len(sites)
+    while distress_site in route:
+        distress_site = (distress_site + 1) % len(sites)
+    assert distress_site not in route
+assert {story_index % 4 for story_index in range(len(story_codes))} == {0, 1, 2, 3}
 estimated_durations = []
 for route in routes:
     points = [(0, -4), *(sites[index] for index in route), (0, -4)]
@@ -65,11 +71,16 @@ bootstrap_source = (ROOT / "Assets/Scripts/PrototypeBootstrap.cs").read_text()
 for token in ("CreateMountainTerrain", "TerrainData", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ArtificialHorizon", "missionSites", "FrozenLake", "OldMineEntrance", "WeatherStation", "ForestShelter", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
     assert token in bootstrap_source
 assert "XRSettings.eyeTextureResolutionScale = 1f;" in bootstrap_source
+assert "package.AddComponent<Rigidbody>()" in bootstrap_source
 
 mission_source = (ROOT / "Assets/Scripts/MissionController.cs").read_text()
 for token in ("STORY FLIGHT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "MOTORS OFF / B ARM", "NAV {navigation}", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
     assert token in mission_source
 for token in ("RefreshCampaignProgress", "救助ネットワーク", "networkReadiness", "completedStories"):
+    assert token in mission_source
+for token in ("DistressSiteFor", "distressOfferUntil", "OPTIONAL RESCUE", "UpdateHazards", "CROSSWIND", "ROTOR", "UpdatePackageSway", "DeliveryReady", "ApplyWorldProgress", "PILOT STYLE"):
+    assert token in mission_source
+for token in ("CLOSING WEATHER", "WEAK BATTERY", "NAV INTERFERENCE", "UNSTABLE AIR"):
     assert token in mission_source
 assert mission_source.count("drone.BeginMission(homePad.position);") == 3
 active_flow = mission_source.split("else if (State == MissionState.Active)", 1)[1].split("else if (input.rightPrimaryDown)", 1)[0]
@@ -86,6 +97,7 @@ for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlan
 drone_source = (ROOT / "Assets/Scripts/DroneController.cs").read_text()
 for token in ("MotorsArmed", "ResetToIdle", "SetFlightMode", "ApplyReturnHome", "ApplyAssistedFlight", "ApplyAttitude", "maxTiltDegrees", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
     assert token in drone_source
+assert "SetBatteryDrain" in drone_source
 assert "public bool MotorsArmed { get; private set; }\n" in drone_source
 assert drone_source.count("MotorsArmed = true;") == 2
 assert "body.linearVelocity = new Vector3(horizontal.x" not in drone_source

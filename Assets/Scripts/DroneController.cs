@@ -30,6 +30,7 @@ public sealed class DroneController : MonoBehaviour
     private Vector3 homePosition;
     private float returnAltitude;
     private float targetYaw;
+    private float batteryDrainMultiplier = 1f;
     private const float CrashSpeed = 6f;
 
     private void Awake()
@@ -81,6 +82,8 @@ public sealed class DroneController : MonoBehaviour
 
     public void SetWind(Vector3 wind) => Wind = wind;
 
+    public void SetBatteryDrain(float multiplier) => batteryDrainMultiplier = Mathf.Max(0.1f, multiplier);
+
     private void Update()
     {
         if (Crashed || !QuestInput.Current.rightSecondaryDown) return;
@@ -116,7 +119,7 @@ public sealed class DroneController : MonoBehaviour
             ReturningHome = true;
         }
 
-        batterySeconds = Mathf.Max(0f, batterySeconds - dt * (0.55f + throttle * 0.9f));
+        batterySeconds = Mathf.Max(0f, batterySeconds - dt * (0.55f + throttle * 0.9f) * batteryDrainMultiplier);
         if (batterySeconds <= 0f)
         {
             Crashed = true;

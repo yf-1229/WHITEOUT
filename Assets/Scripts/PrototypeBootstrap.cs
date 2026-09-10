@@ -456,7 +456,10 @@ public sealed class PrototypeBootstrap : MonoBehaviour
     {
         var package = CreatePart(PrimitiveType.Cube, parent, new Vector3(0f, -0.28f, 0f), new Vector3(0.28f, 0.2f, 0.28f), new Color(0.92f, 0.94f, 0.9f));
         package.name = "EmergencyMedicalPackage";
-        Object.Destroy(package.GetComponent<Collider>());
+        var body = package.AddComponent<Rigidbody>();
+        body.isKinematic = true;
+        body.useGravity = false;
+        package.GetComponent<Collider>().enabled = false;
         return package;
     }
 

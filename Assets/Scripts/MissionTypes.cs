@@ -15,4 +15,5 @@ public struct MissionResult
     public float landingDistance;
     public int score;
     public string grade;
+    public string pilotStyle;
 }
