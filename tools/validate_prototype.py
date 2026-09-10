@@ -29,6 +29,8 @@ assert f"guid: {guid}" in scene
 
 player_settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text()
 assert "  activeInputHandler: 1\n" in player_settings
+assert "  defaultScreenWidth: 1920\n" in player_settings
+assert "  defaultScreenHeight: 1080\n" in player_settings
 
 for script in (ROOT / "Assets/Scripts").glob("*.cs"):
     source = script.read_text()
@@ -62,9 +64,12 @@ for route in routes:
 bootstrap_source = (ROOT / "Assets/Scripts/PrototypeBootstrap.cs").read_text()
 for token in ("CreateMountainTerrain", "TerrainData", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ArtificialHorizon", "missionSites", "FrozenLake", "OldMineEntrance", "WeatherStation", "ForestShelter", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
     assert token in bootstrap_source
+assert "XRSettings.eyeTextureResolutionScale = 1f;" in bootstrap_source
 
 mission_source = (ROOT / "Assets/Scripts/MissionController.cs").read_text()
 for token in ("STORY FLIGHT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "MOTORS OFF / B ARM", "NAV {navigation}", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
+    assert token in mission_source
+for token in ("RefreshCampaignProgress", "救助ネットワーク", "networkReadiness", "completedStories"):
     assert token in mission_source
 assert mission_source.count("drone.BeginMission(homePad.position);") == 3
 active_flow = mission_source.split("else if (State == MissionState.Active)", 1)[1].split("else if (input.rightPrimaryDown)", 1)[0]
@@ -79,9 +84,13 @@ for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlan
     assert token in fpv_source
 
 drone_source = (ROOT / "Assets/Scripts/DroneController.cs").read_text()
-for token in ("MotorsArmed", "ResetToIdle", "ApplyReturnHome", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
+for token in ("MotorsArmed", "ResetToIdle", "SetFlightMode", "ApplyReturnHome", "ApplyAssistedFlight", "ApplyAttitude", "maxTiltDegrees", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
     assert token in drone_source
 assert "public bool MotorsArmed { get; private set; }\n" in drone_source
 assert drone_source.count("MotorsArmed = true;") == 2
+assert "body.linearVelocity = new Vector3(horizontal.x" not in drone_source
+
+assert 'camera.clearFlags = CameraClearFlags.Skybox;' in bootstrap_source
+assert 'Shader.Find("Skybox/Procedural")' in bootstrap_source
 
 print(f"prototype smoke check: {len(story_codes)} stories, {min(estimated_durations) / 60:.1f}-{max(estimated_durations) / 60:.1f} min, ok")

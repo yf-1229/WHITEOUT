@@ -74,8 +74,8 @@ adb shell monkey -p com.yourstudio.dronejobs 1
 - 右スティック押し込み：メニューで前話
 - Y：フリーフライト中の操作モード切替
 - 右グリップ：操縦者、フルFPV、三人称追従を切り替える
-- 左スティック：高度・ヨー
-- 右スティック：前後・左右
+- 左スティック：アシスト時は高度・ヨー、マニュアル時はスロットル・ヨー
+- 右スティック：アシスト時は進行方向、マニュアル時はピッチ・ロール（どちらも機体を傾けて推力方向を変える）
 - 右トリガー：物資投下／スキャン確定／標識設置
 - B：自動帰還・着陸、着陸後にもう一度押すと離陸
 - キーボード検証時はREADMEのキー割り当てを使う
@@ -92,6 +92,7 @@ adb shell monkey -p com.yourstudio.dronejobs 1
 - リトライで位置、荷物、電池、スコアが初期化される
 - 救援成功後に物語の結末、スコア、グレードが表示される
 - 各話のベストスコアが個別にローカル保存される
+- 各話のベストスコアが救助ネットワークの完了数・準備率へ反映される
 - メニューで各話のクリア状況とベストスコアを確認できる
 - HUDのNAV左右指示だけで吹雪中も目標へ旋回できる
 - 着陸後はHUDにモーター停止と再始動操作が表示される
@@ -106,6 +107,22 @@ adb shell monkey -p com.yourstudio.dronejobs 1
 - Quest 2で発熱、メモリ増加、音切れがない
 
 UnityエディタのGameビューはQuest実機の代替にならない。最終確認は必ずQuest 2で行う。
+
+### 画質を維持する描画最適化
+
+- 背後・視野外の除外はUnity標準のカメラごとのフラスタムカリングに任せる。主視点から見えない物体でもFPV映像や画面内の影に必要な場合があるため、物体自体を無効化しない。
+- 同じ材質の木・機体部品はマテリアルを共有し、岩はノイズテクスチャも共有する。同じ色の着陸リングもマテリアルを再利用する。
+- `StaticScenery`配下の木・岩・建物・着陸リングを生成時に静的バッチ化する。物体ごとのカリング境界を維持し、機体・荷物・サーマル対象は含めない。静的バッチは頂点データを複製するため、景観を大幅に増やす場合はメモリを計測してインスタンシングを検討する。
+- FPVカメラは単眼でレンダリングし、UIレイヤーのHUD・モニター・快適性フレームを除外する。従来の512px・2x MSAA・30fps更新を維持する。
+- XR解像度、主カメラの表示距離、4x MSAA、影、地形精度、草・吹雪の量は変更していない。
+
+Unityの[視野外カリング](https://docs.unity3d.com/6000.0/Documentation/Manual/OcclusionCulling.html)と[静的バッチAPI](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/StaticBatchingUtility.html)を使用している。実行時生成シーンに対するベイク済み遮蔽カリングは導入していない。
+
+`python3 tools/validate_prototype.py`に加え、Unityを`-batchmode -nographics -projectPath <project> -executeMethod ProjectConfigurator.SmokePlayMode -logFile <log>`で起動すると、Play Modeで資源の共有、静的バッチ、個別の境界、動く部品の除外、FPVのレイヤーと画質設定を検証する。`RENDER CHECK`にマテリアル・テクスチャ・バッチ対象の数を出力する。GPUの描画時間はこの検証では測れないため、QuestのProfiler/Frame Debuggerで操縦者・FPV・追従、180度旋回、吹雪、サーマル切替を比較する。
+
+Unity 6000.6.0f1のPlay Modeで、MeshRendererは402個のまま、参照するマテリアルは264→31個、テクスチャは29→10個、静的バッチ対象は0→375個になった。この件数にはTerrain・吹雪・Canvas用の資源は含まれず、FPSや総メモリの改善率を示すものではない。
+
+検証時の制限：描画の全アサーションとPythonチェックは通過したが、Unity 6000.6.0f1のバッチ起動では`UnityEditor.Search.SearchDatabase.EnumerateAll`に`ArgumentOutOfRangeException`が発生し、スモークテスト全体は終了コード1になる。変更前とキャッシュなしの一時コピーでも再現した。Questでの見た目・FPS・総メモリ比較は未実施。
 
 ## 4. リリース用ビルド
 

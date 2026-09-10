@@ -29,6 +29,8 @@ public sealed class MissionController : MonoBehaviour
     private float abortConfirmationUntil;
     private int routeStep;
     private int jobPenalty;
+    private int completedStories;
+    private int networkReadiness;
     private MissionResult lastResult;
 
     private void Start()
@@ -37,10 +39,11 @@ public sealed class MissionController : MonoBehaviour
         SelectedStory = Mathf.Clamp(PlayerPrefs.GetInt("storyIndex", 0), 0, StoryCatalog.All.Length - 1);
         body = drone.GetComponent<Rigidbody>();
         freeFlightSpeed = drone.maxHorizontalSpeed;
-        drone.flightMode = selectedMode;
+        drone.SetFlightMode(selectedMode);
         drone.BeginMission(homePad.position);
         package.gameObject.SetActive(false);
         SetStorm(0f);
+        RefreshCampaignProgress();
         UpdateDisplay();
     }
 
@@ -52,7 +55,7 @@ public sealed class MissionController : MonoBehaviour
             if (input.leftSecondaryDown)
             {
                 selectedMode = selectedMode == FlightMode.Assist ? FlightMode.Manual : FlightMode.Assist;
-                drone.flightMode = selectedMode;
+                drone.SetFlightMode(selectedMode);
                 PlayerPrefs.SetInt("flightMode", (int)selectedMode);
             }
             if (input.leftPrimaryDown) SelectStory(1);
@@ -98,7 +101,7 @@ public sealed class MissionController : MonoBehaviour
         abortConfirmationUntil = 0f;
         missionStart = Time.time;
         jobPenalty = 0;
-        drone.flightMode = selectedMode;
+        drone.SetFlightMode(selectedMode);
         drone.maxHorizontalSpeed = missionCruiseSpeed;
         drone.BeginMission(homePad.position);
         drone.SetWind(new Vector3(Story.wind, 0f, -Story.wind * 0.35f));
@@ -187,7 +190,21 @@ public sealed class MissionController : MonoBehaviour
         };
         if (score > PlayerPrefs.GetInt(BestKey, 0)) PlayerPrefs.SetInt(BestKey, score);
         PlayerPrefs.Save();
+        RefreshCampaignProgress();
         SetStorm(0f);
+    }
+
+    private void RefreshCampaignProgress()
+    {
+        completedStories = 0;
+        var readiness = 0f;
+        foreach (var story in StoryCatalog.All)
+        {
+            var best = PlayerPrefs.GetInt($"best_story_{story.code}", 0);
+            if (best > 0) completedStories++;
+            readiness += Mathf.Clamp01(best / 900f);
+        }
+        networkReadiness = Mathf.RoundToInt(readiness / StoryCatalog.All.Length * 100f);
     }
 
     private void SetStorm(float strength)
@@ -230,7 +247,8 @@ public sealed class MissionController : MonoBehaviour
             var record = best > 0 ? $"CLEARED  /  BEST {best}" : "NEW MISSION";
             statusText.text = $"STORY FLIGHT  {SelectedStory + 1:00} / {StoryCatalog.All.Length:00}   ~5 MIN\n\n" +
                               $"A / 1   START: {Story.title}\n{record}  /  {Story.briefing}\n\n" +
-                              $"X / 2  NEXT   R-STICK / 3  PREV\nY / M  操作: {selectedMode}";
+                              $"救助ネットワーク {networkReadiness}%  /  完了 {completedStories}/{StoryCatalog.All.Length}\n" +
+                              $"X / 2  NEXT   R-STICK / 3  PREV   Y / M  操作: {selectedMode}";
             return;
         }
 
@@ -248,7 +266,7 @@ public sealed class MissionController : MonoBehaviour
         }
 
         statusText.text = State == MissionState.Completed
-            ? $"MISSION COMPLETE  /  {Story.title}\n\n{Story.success}\n{lastResult.score} PTS   GRADE {lastResult.grade}   {lastResult.elapsedSeconds:0}s\n\nA / 1  REPLAY    X / 2  NEXT STORY"
+            ? $"MISSION COMPLETE  /  {Story.title}\n\n{Story.success}\n{lastResult.score} PTS   GRADE {lastResult.grade}   {lastResult.elapsedSeconds:0}s\n救助ネットワーク {networkReadiness}%  /  完了 {completedStories}/{StoryCatalog.All.Length}\n\nA / 1  REPLAY    X / 2  NEXT STORY"
             : $"SIGNAL LOST  /  {Story.title}\n\n任務は完了しなかった。\n嵐が強まる前に再出動せよ。\n\nA / 1  RETRY    X / 2  MENU";
     }
 

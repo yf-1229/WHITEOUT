@@ -72,6 +72,8 @@ public sealed class ViewController : MonoBehaviour
         AddBar(frame.transform, material, new Vector3(0f, -0.43f, 0.85f), new Vector3(1.2f, 0.06f, 0.04f));
         AddBar(frame.transform, material, new Vector3(-0.62f, 0f, 0.85f), new Vector3(0.06f, 0.86f, 0.04f));
         AddBar(frame.transform, material, new Vector3(0.62f, 0f, 0.85f), new Vector3(0.06f, 0.86f, 0.04f));
+        foreach (var child in frame.GetComponentsInChildren<Transform>())
+            child.gameObject.layer = LayerMask.NameToLayer("UI");
         return frame;
     }
 

@@ -8,6 +8,10 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 {
     private static readonly Color Cyan = new(0.1f, 0.9f, 1f);
     private static readonly Color Orange = new(1f, 0.35f, 0.08f);
+    private readonly Dictionary<(Material, Color), Material> partMaterials = new();
+    private readonly Dictionary<(Color, float), Material> surfaceMaterials = new();
+    private readonly Dictionary<Color, Material> glowMaterials = new();
+    private Transform staticScenery;
 
     private void Awake()
     {
@@ -35,6 +39,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var camera = CreateViewer(homePosition + new Vector3(0f, 1.55f, -6f));
 
         CreateLighting();
+        staticScenery = new GameObject("StaticScenery").transform;
         CreateAlpineEnvironment(terrain, homePosition, groundSites);
         var homePad = CreateLandingLight("HomeBase", homePosition, 2.2f, Cyan);
         var sitePositions = (Vector3[])groundSites.Clone();
@@ -46,6 +51,9 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var missionSites = new Transform[sitePositions.Length];
         for (var i = 0; i < missionSites.Length; i++)
             missionSites[i] = CreateLandingLight(siteNames[i], sitePositions[i], 2.8f, siteColors[i]).transform;
+        // Keep each renderer's culling bounds, including FPV views and off-screen shadow casters.
+        // ponytail: static batching copies geometry; use instancing if scenery grows enough to pressure Quest memory.
+        StaticBatchingUtility.Combine(staticScenery.gameObject);
         var rescueTarget = CreateRescueTarget(groundSites[1] + new Vector3(2.4f, 0.9f, 1.5f));
 
         var drone = CreateDrone(homePosition + Vector3.up * 0.42f);
@@ -207,7 +215,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         viewer.tag = "MainCamera";
         viewer.transform.position = origin;
         var camera = viewer.AddComponent<Camera>();
-        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.clearFlags = CameraClearFlags.Skybox;
         camera.backgroundColor = new Color(0.43f, 0.5f, 0.56f);
         camera.nearClipPlane = 0.03f;
         camera.farClipPlane = 720f;
@@ -226,6 +234,16 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         light.color = new Color(0.78f, 0.86f, 1f);
         light.shadows = LightShadows.Hard;
         lightObject.transform.rotation = Quaternion.Euler(28f, -38f, 0f);
+        var skyShader = Shader.Find("Skybox/Procedural");
+        if (skyShader != null)
+        {
+            var sky = new Material(skyShader);
+            sky.SetFloat("_SunSize", 0.035f);
+            sky.SetFloat("_AtmosphereThickness", 0.65f);
+            sky.SetColor("_SkyTint", new Color(0.42f, 0.55f, 0.72f));
+            sky.SetColor("_GroundColor", new Color(0.24f, 0.28f, 0.32f));
+            RenderSettings.skybox = sky;
+        }
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
         RenderSettings.fogColor = new Color(0.62f, 0.69f, 0.75f);
@@ -235,9 +253,8 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         RenderSettings.ambientGroundColor = new Color(0.14f, 0.16f, 0.18f);
     }
 
-    private static void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3[] sites)
+    private void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3[] sites)
     {
-        // ponytail: primitive LOD scenery is the Quest-safe ceiling; swap in authored terrain/tree LODs when the art direction is funded.
         var random = new System.Random(2187);
         for (var i = 0; i < 34; i++)
         {
@@ -252,10 +269,11 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             var position = OnTerrain(terrain, new Vector3((float)random.NextDouble() * 450f - 225f, 0f, (float)random.NextDouble() * 400f - 70f));
             var rock = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             rock.name = "GraniteOutcrop";
+            rock.transform.SetParent(staticScenery, false);
             rock.transform.position = position - Vector3.up * 0.2f;
             rock.transform.rotation = RandomRotation(random);
             rock.transform.localScale = new Vector3(1.4f, 0.8f, 1.1f) * (0.7f + (float)random.NextDouble() * 1.5f);
-            rock.GetComponent<Renderer>().material = SurfaceMaterial(new Color(0.25f, 0.28f, 0.3f), 0.12f);
+            rock.GetComponent<Renderer>().sharedMaterial = SurfaceMaterial(new Color(0.25f, 0.28f, 0.3f), 0.12f);
             Object.Destroy(rock.GetComponent<Collider>());
         }
 
@@ -280,9 +298,10 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 
     private static Quaternion RandomRotation(System.Random random) => Quaternion.Euler((float)random.NextDouble() * 25f, (float)random.NextDouble() * 360f, (float)random.NextDouble() * 25f);
 
-    private static void CreateFir(Vector3 position, float scale)
+    private void CreateFir(Vector3 position, float scale)
     {
         var root = new GameObject("SnowFir");
+        root.transform.SetParent(staticScenery, false);
         root.transform.position = position;
         root.transform.localScale = Vector3.one * scale;
         var trunk = CreatePart(PrimitiveType.Cylinder, root.transform, new Vector3(0f, 1.4f, 0f), new Vector3(0.22f, 1.4f, 0.22f), new Color(0.2f, 0.12f, 0.07f));
@@ -296,33 +315,41 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         Object.Destroy(trunk.GetComponent<Collider>());
     }
 
-    private static GameObject CreateBox(string name, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
+    private GameObject CreateBox(string name, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
     {
         var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
         box.name = name;
+        box.transform.SetParent(staticScenery, false);
         box.transform.position = position;
         box.transform.localScale = scale;
         box.transform.rotation = rotation == default ? Quaternion.identity : rotation;
-        box.GetComponent<Renderer>().material = SurfaceMaterial(color, 0.06f);
+        box.GetComponent<Renderer>().sharedMaterial = SurfaceMaterial(color, 0.06f);
         return box;
     }
 
-    private static Material SurfaceMaterial(Color color, float variation)
+    private Material SurfaceMaterial(Color color, float variation)
     {
+        if (surfaceMaterials.TryGetValue((color, variation), out var shared)) return shared;
         var material = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
         material.mainTexture = NoiseTexture(color, variation);
         material.mainTextureScale = new Vector2(4f, 4f);
         if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", 0.08f);
+        surfaceMaterials.Add((color, variation), material);
         return material;
     }
 
-    private static GameObject CreateLandingLight(string name, Vector3 position, float diameter, Color color)
+    private GameObject CreateLandingLight(string name, Vector3 position, float diameter, Color color)
     {
         var zone = new GameObject(name);
+        zone.transform.SetParent(staticScenery, false);
         zone.transform.position = position;
-        var material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
-        material.color = color;
-        if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+        if (!glowMaterials.TryGetValue(color, out var material))
+        {
+            material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
+            material.color = color;
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+            glowMaterials.Add(color, material);
+        }
         for (var i = 0; i < 16; i++)
         {
             var angle = i / 16f * Mathf.PI * 2f;
@@ -348,7 +375,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return zone;
     }
 
-    private static DroneController CreateDrone(Vector3 position)
+    private DroneController CreateDrone(Vector3 position)
     {
         var droneObject = new GameObject("Drone");
         droneObject.transform.position = position;
@@ -395,30 +422,37 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return controller;
     }
 
-    private static void CreateDroneArm(Transform parent, float yaw)
+    private void CreateDroneArm(Transform parent, float yaw)
     {
         CreateDronePart(PrimitiveType.Cube, "CarbonArm", parent, Vector3.zero, new Vector3(1.15f, 0.055f, 0.07f), new Color(0.04f, 0.055f, 0.065f), Quaternion.Euler(0f, yaw, 0f));
     }
 
-    private static void CreateDronePart(PrimitiveType primitive, string name, Transform parent, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
+    private void CreateDronePart(PrimitiveType primitive, string name, Transform parent, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
     {
         var part = CreatePart(primitive, parent, position, scale, color, rotation);
         part.name = name;
         Object.Destroy(part.GetComponent<Collider>());
     }
 
-    private static GameObject CreatePart(PrimitiveType primitive, Transform parent, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
+    private GameObject CreatePart(PrimitiveType primitive, Transform parent, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
     {
         var part = GameObject.CreatePrimitive(primitive);
         part.transform.SetParent(parent, false);
         part.transform.localPosition = position;
         part.transform.localRotation = rotation == default ? Quaternion.identity : rotation;
         part.transform.localScale = scale;
-        part.GetComponent<Renderer>().material.color = color;
+        var renderer = part.GetComponent<Renderer>();
+        var key = (renderer.sharedMaterial, color);
+        if (!partMaterials.TryGetValue(key, out var material))
+        {
+            material = new Material(renderer.sharedMaterial) { color = color };
+            partMaterials.Add(key, material);
+        }
+        renderer.sharedMaterial = material;
         return part;
     }
 
-    private static GameObject CreatePackage(Transform parent)
+    private GameObject CreatePackage(Transform parent)
     {
         var package = CreatePart(PrimitiveType.Cube, parent, new Vector3(0f, -0.28f, 0f), new Vector3(0.28f, 0.2f, 0.28f), new Color(0.92f, 0.94f, 0.9f));
         package.name = "EmergencyMedicalPackage";
@@ -426,7 +460,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return package;
     }
 
-    private static GameObject CreateRescueTarget(Vector3 position)
+    private GameObject CreateRescueTarget(Vector3 position)
     {
         var person = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         person.name = "RescueLeader";
@@ -511,6 +545,8 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         Line(canvas.transform, new Vector2(0f, 0f), new Vector2(42f, 4f), Orange);
         Line(canvas.transform, new Vector2(-290f, 0f), new Vector2(70f, 3f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.55f));
         Line(canvas.transform, new Vector2(290f, 0f), new Vector2(70f, 3f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.55f));
+        foreach (var child in canvasObject.GetComponentsInChildren<Transform>())
+            child.gameObject.layer = LayerMask.NameToLayer("UI");
     }
 
     private static Image UiImage(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 position, Vector2 size, Color color, Vector2 pivot)
@@ -548,5 +584,16 @@ public sealed class PrototypeBootstrap : MonoBehaviour
     private static void Line(Transform parent, Vector2 position, Vector2 size, Color color)
     {
         UiImage(parent, "HudLine", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), position, size, color, new Vector2(0.5f, 0.5f));
+    }
+
+    private void OnDestroy()
+    {
+        foreach (var material in partMaterials.Values) Object.Destroy(material);
+        foreach (var material in glowMaterials.Values) Object.Destroy(material);
+        foreach (var material in surfaceMaterials.Values)
+        {
+            Object.Destroy(material.mainTexture);
+            Object.Destroy(material);
+        }
     }
 }

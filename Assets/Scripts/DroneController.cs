@@ -4,11 +4,12 @@ using UnityEngine;
 public sealed class DroneController : MonoBehaviour
 {
     public FlightMode flightMode = FlightMode.Assist;
-    public float throttleForce = 12f;
     public float verticalSpeed = 2.5f;
     public float altitudeGain = 18f;
-    public float attitudeTorque = 2.8f;
+    public float attitudeTorque = 10f;
+    public float manualTorque = 4f;
     public float yawTorque = 1.8f;
+    public float maxTiltDegrees = 28f;
     public float maxHorizontalSpeed = 8f;
     public float batterySeconds = 360f;
     public float geofenceWarningDistance = 330f;
@@ -28,6 +29,7 @@ public sealed class DroneController : MonoBehaviour
     private float targetAltitude;
     private Vector3 homePosition;
     private float returnAltitude;
+    private float targetYaw;
     private const float CrashSpeed = 6f;
 
     private void Awake()
@@ -42,6 +44,7 @@ public sealed class DroneController : MonoBehaviour
         homePosition = transform.position;
         returnAltitude = homePosition.y + 45f;
         targetAltitude = transform.position.y;
+        targetYaw = transform.eulerAngles.y;
     }
 
     public void ResetToIdle(Vector3 home)
@@ -58,6 +61,7 @@ public sealed class DroneController : MonoBehaviour
         MotorsArmed = false;
         ReturningHome = false;
         returnAltitude = home.y + 45f;
+        targetYaw = 0f;
         GeofenceWarning = false;
     }
 
@@ -65,6 +69,14 @@ public sealed class DroneController : MonoBehaviour
     {
         ResetToIdle(home);
         MotorsArmed = true;
+    }
+
+    public void SetFlightMode(FlightMode mode)
+    {
+        flightMode = mode;
+        if (mode != FlightMode.Assist) return;
+        targetAltitude = transform.position.y;
+        targetYaw = transform.eulerAngles.y;
     }
 
     public void SetWind(Vector3 wind) => Wind = wind;
@@ -113,17 +125,15 @@ public sealed class DroneController : MonoBehaviour
             return;
         }
 
-        if (ReturningHome) ApplyReturnHome();
+        if (ReturningHome) ApplyReturnHome(dt);
         else ApplyFlight(left, right, dt);
         if (!MotorsArmed) return;
-        body.AddForce(Wind, ForceMode.Acceleration);
-
         var horizontal = new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z);
+        var gust = 1f + Mathf.Sin(Time.time * 0.73f + transform.position.z * 0.04f) * 0.25f;
+        body.AddForce((Wind * gust - horizontal) * 0.22f, ForceMode.Acceleration);
+
         if (horizontal.magnitude > maxHorizontalSpeed)
-        {
-            horizontal = horizontal.normalized * maxHorizontalSpeed;
-            body.linearVelocity = new Vector3(horizontal.x, body.linearVelocity.y, horizontal.z);
-        }
+            body.AddForce(-horizontal.normalized * (horizontal.magnitude - maxHorizontalSpeed) * 3f, ForceMode.Acceleration);
     }
 
     private void ApplyFlight(Vector2 left, Vector2 right, float dt)
@@ -132,33 +142,28 @@ public sealed class DroneController : MonoBehaviour
         {
             if (Mathf.Abs(left.y) > 0.05f)
                 targetAltitude = Mathf.Clamp(targetAltitude + left.y * verticalSpeed * dt, homePosition.y + 0.25f, homePosition.y + 75f);
-            var verticalError = targetAltitude - transform.position.y;
-            body.AddForce(Vector3.up * (verticalError * altitudeGain - body.linearVelocity.y * 4f), ForceMode.Acceleration);
-            StabilizeAttitude();
+            targetYaw = Mathf.Repeat(targetYaw + left.x * 75f * dt, 360f);
+            var heading = Quaternion.Euler(0f, targetYaw, 0f);
+            ApplyAssistedFlight(heading * new Vector3(right.x, 0f, right.y) * maxHorizontalSpeed, targetAltitude, targetYaw);
         }
         else
         {
-            body.AddForce(Vector3.up * left.y * throttleForce, ForceMode.Acceleration);
+            body.AddForce(transform.up * Physics.gravity.magnitude * (1f + left.y * 0.8f), ForceMode.Acceleration);
+            body.AddRelativeTorque(new Vector3(-right.y * manualTorque, left.x * yawTorque, -right.x * manualTorque), ForceMode.Acceleration);
         }
-
-        var planarInput = transform.forward * right.y + transform.right * right.x;
-        var desiredPlanarVelocity = planarInput * maxHorizontalSpeed;
-        var planarVelocity = new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z);
-        body.AddForce((desiredPlanarVelocity - planarVelocity) * (flightMode == FlightMode.Assist ? 3.5f : 1.8f), ForceMode.Acceleration);
-        body.AddRelativeTorque(new Vector3(-right.y, left.x * yawTorque, -right.x) * attitudeTorque, ForceMode.Acceleration);
     }
 
-    private void ApplyReturnHome()
+    private void ApplyReturnHome(float dt)
     {
         var delta = homePosition - transform.position;
         var planar = new Vector3(delta.x, 0f, delta.z);
         var target = planar.magnitude > 20f
             ? returnAltitude
             : Mathf.Lerp(homePosition.y + 0.2f, returnAltitude, planar.magnitude / 20f);
-        body.AddForce(planar * 1.8f - new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z) * 1.2f, ForceMode.Acceleration);
-        var verticalError = target - transform.position.y;
-        body.AddForce(Vector3.up * (verticalError * altitudeGain - body.linearVelocity.y * 4f), ForceMode.Acceleration);
-        StabilizeAttitude();
+        if (planar.sqrMagnitude > 0.01f)
+            targetYaw = Mathf.MoveTowardsAngle(targetYaw, Mathf.Atan2(planar.x, planar.z) * Mathf.Rad2Deg, 55f * dt);
+        var desiredVelocity = planar.normalized * Mathf.Min(maxHorizontalSpeed, planar.magnitude * 0.35f);
+        ApplyAssistedFlight(desiredVelocity, target, targetYaw);
         if (planar.magnitude >= 0.8f || !IsLanded) return;
         ReturningHome = false;
         MotorsArmed = false;
@@ -167,10 +172,26 @@ public sealed class DroneController : MonoBehaviour
         QuestInput.PulseRight(0.2f, 0.1f);
     }
 
-    private void StabilizeAttitude()
+    private void ApplyAssistedFlight(Vector3 desiredVelocity, float desiredAltitude, float yaw)
     {
-        var tilt = Vector3.Cross(transform.up, Vector3.up);
-        body.AddTorque(tilt * attitudeTorque, ForceMode.Acceleration);
+        var planarVelocity = new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z);
+        var maxAcceleration = Mathf.Tan(maxTiltDegrees * Mathf.Deg2Rad) * Physics.gravity.magnitude;
+        var desiredAcceleration = Vector3.ClampMagnitude((desiredVelocity - planarVelocity) * 2.2f, maxAcceleration);
+        var desiredUp = (Vector3.up + desiredAcceleration / Physics.gravity.magnitude).normalized;
+        var desiredForward = Vector3.ProjectOnPlane(Quaternion.Euler(0f, yaw, 0f) * Vector3.forward, desiredUp).normalized;
+        ApplyAttitude(Quaternion.LookRotation(desiredForward, desiredUp));
+
+        var verticalAcceleration = Mathf.Clamp((desiredAltitude - transform.position.y) * altitudeGain - body.linearVelocity.y * 4f, -7f, 7f);
+        var tiltCompensation = Mathf.Max(0.35f, Vector3.Dot(transform.up, Vector3.up));
+        body.AddForce(transform.up * Mathf.Max(0f, Physics.gravity.magnitude + verticalAcceleration) / tiltCompensation, ForceMode.Acceleration);
+    }
+
+    private void ApplyAttitude(Quaternion desiredRotation)
+    {
+        var error = desiredRotation * Quaternion.Inverse(body.rotation);
+        error.ToAngleAxis(out var angle, out var axis);
+        if (angle > 180f) angle -= 360f;
+        body.AddTorque(axis * (angle * Mathf.Deg2Rad * attitudeTorque) - body.angularVelocity * 2.8f, ForceMode.Acceleration);
     }
 
     private void OnCollisionEnter(Collision collision)

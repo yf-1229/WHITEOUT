@@ -29,6 +29,8 @@ public sealed class FpvMonitor : MonoBehaviour
         var cameraObject = new GameObject("FPVCamera");
         cameraObject.transform.SetParent(transform, false);
         fpvCamera = cameraObject.AddComponent<Camera>();
+        fpvCamera.stereoTargetEye = StereoTargetEyeMask.None;
+        fpvCamera.cullingMask &= ~LayerMask.GetMask("UI");
         fpvCamera.fieldOfView = 84f;
         fpvCamera.nearClipPlane = 0.08f;
         fpvCamera.enabled = false;
@@ -42,6 +44,7 @@ public sealed class FpvMonitor : MonoBehaviour
 
         panel = GameObject.CreatePrimitive(PrimitiveType.Quad);
         panel.name = "FPVMonitor";
+        panel.layer = LayerMask.NameToLayer("UI");
         panel.transform.SetParent(viewer.transform, false);
         panel.transform.localPosition = new Vector3(0.3f, -0.18f, 0.82f);
         panel.transform.localRotation = Quaternion.identity;
@@ -49,7 +52,7 @@ public sealed class FpvMonitor : MonoBehaviour
         Object.Destroy(panel.GetComponent<Collider>());
         var material = new Material(Shader.Find("Unlit/Texture") ?? Shader.Find("Universal Render Pipeline/Unlit"));
         material.mainTexture = feed;
-        panel.GetComponent<Renderer>().material = material;
+        panel.GetComponent<Renderer>().sharedMaterial = material;
     }
 
     private void Update()
