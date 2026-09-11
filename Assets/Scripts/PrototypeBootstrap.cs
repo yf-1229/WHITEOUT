@@ -38,7 +38,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         };
         var camera = CreateViewer(homePosition + new Vector3(0f, 1.55f, -6f));
 
-        CreateLighting();
+        var sun = CreateLighting();
         staticScenery = new GameObject("StaticScenery").transform;
         CreateAlpineEnvironment(terrain, homePosition, groundSites);
         var homePad = CreateLandingLight("HomeBase", homePosition, 2.2f, Cyan);
@@ -54,21 +54,25 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         // Keep each renderer's culling bounds, including FPV views and off-screen shadow casters.
         // ponytail: static batching copies geometry; use instancing if scenery grows enough to pressure Quest memory.
         StaticBatchingUtility.Combine(staticScenery.gameObject);
-        var rescueTarget = CreateRescueTarget(groundSites[1] + new Vector3(2.4f, 0.9f, 1.5f));
+        CreateRescueTarget(groundSites[1] + new Vector3(2.4f, 0.9f, 1.5f));
+        var thermalTargets = new Renderer[groundSites.Length];
+        for (var i = 0; i < thermalTargets.Length; i++)
+            thermalTargets[i] = CreateThermalTarget(groundSites[i] + Vector3.up * 0.7f);
 
         var drone = CreateDrone(homePosition + Vector3.up * 0.42f);
         var package = CreatePackage(drone.transform);
+        var fieldMarker = CreateFieldMarker();
         var monitor = gameObject.AddComponent<FpvMonitor>();
         monitor.drone = drone;
-        monitor.thermalTargets = new[] { rescueTarget.GetComponent<Renderer>() };
+        monitor.thermalTargets = thermalTargets;
         monitor.Build(camera);
         var views = gameObject.AddComponent<ViewController>();
         views.drone = drone;
         views.pose = camera.GetComponent<QuestPoseDriver>();
         views.monitor = monitor;
-        views.Build(camera);
-
         CreateHud(camera, out var status, out var telemetry, out var horizon);
+        views.hud = telemetry.canvas;
+        views.Build(camera);
         var missions = gameObject.AddComponent<MissionController>();
         missions.drone = drone;
         missions.fpv = monitor;
@@ -76,10 +80,12 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         missions.homePad = homePad.transform;
         missions.missionSites = missionSites;
         missions.package = package.transform;
+        missions.fieldMarker = fieldMarker.transform;
         missions.statusText = status;
         missions.telemetryText = telemetry;
         missions.artificialHorizon = horizon;
         missions.blizzard = CreateBlizzard(camera.transform);
+        missions.sun = sun;
     }
 
     private static Terrain CreateMountainTerrain()
@@ -100,8 +106,10 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             var north = Mathf.InverseLerp(-75f, 390f, worldZ);
             var broad = Mathf.PerlinNoise(x * 0.035f + 2.1f, z * 0.035f + 7.3f);
             var fine = Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 3f);
-            var ridges = 1f - Mathf.Abs(Mathf.PerlinNoise(x * 0.055f, z * 0.055f) * 2f - 1f);
-            var height = 0.025f + north * north * 0.34f + broad * 0.08f + fine * 0.018f + ridges * north * 0.07f;
+            var ridges = Mathf.Pow(1f - Mathf.Abs(Mathf.PerlinNoise(x * 0.055f, z * 0.055f) * 2f - 1f), 2f);
+            var summits = Mathf.Max(AlpinePeak(worldX, worldZ, -170f, 355f, 105f),
+                Mathf.Max(AlpinePeak(worldX, worldZ, 5f, 370f, 82f), AlpinePeak(worldX, worldZ, 175f, 345f, 110f)));
+            var height = 0.025f + north * north * 0.42f + broad * 0.09f + fine * 0.018f + ridges * north * 0.11f + summits * north * 0.22f;
             height = Flatten(height, worldX, worldZ, 0f, -4f, 24f, 0.035f);
             height = Flatten(height, worldX, worldZ, 102f, 186f, 25f, 0.39f);
             heights[z, x] = Mathf.Clamp01(height);
@@ -111,18 +119,26 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var snow = new TerrainLayer();
         snow.diffuseTexture = NoiseTexture(new Color(0.78f, 0.83f, 0.86f), 0.08f);
         snow.tileSize = new Vector2(14f, 14f);
+        snow.smoothness = 0.18f;
+        var windSnow = new TerrainLayer();
+        windSnow.diffuseTexture = NoiseTexture(new Color(0.58f, 0.72f, 0.82f), 0.045f);
+        windSnow.tileSize = new Vector2(22f, 10f);
+        windSnow.smoothness = 0.3f;
         var rock = new TerrainLayer();
         rock.diffuseTexture = NoiseTexture(new Color(0.22f, 0.25f, 0.27f), 0.16f);
         rock.tileSize = new Vector2(11f, 11f);
-        data.terrainLayers = new[] { snow, rock };
-        var blend = new float[64, 64, 2];
+        rock.smoothness = 0.04f;
+        data.terrainLayers = new[] { snow, windSnow, rock };
+        var blend = new float[64, 64, 3];
         for (var z = 0; z < 64; z++)
         for (var x = 0; x < 64; x++)
         {
             var steepness = data.GetSteepness(x / 63f, z / 63f);
             var exposedRock = Mathf.InverseLerp(28f, 55f, steepness);
-            blend[z, x, 0] = 1f - exposedRock;
-            blend[z, x, 1] = exposedRock;
+            var windPack = Mathf.PerlinNoise(x * 0.1f + 4f, z * 0.025f + 8f) * 0.32f * (1f - exposedRock);
+            blend[z, x, 0] = 1f - exposedRock - windPack;
+            blend[z, x, 1] = windPack;
+            blend[z, x, 2] = exposedRock;
         }
         data.SetAlphamaps(0, 0, blend);
         AddAlpineGrass(data);
@@ -143,6 +159,9 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var blend = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(Vector2.Distance(new Vector2(x, z), new Vector2(centerX, centerZ)) / radius));
         return Mathf.Lerp(value, target, blend);
     }
+
+    private static float AlpinePeak(float x, float z, float centerX, float centerZ, float width)
+        => Mathf.Exp(-((x - centerX) * (x - centerX) + (z - centerZ) * (z - centerZ)) / (width * width));
 
     private static void AddAlpineGrass(TerrainData data)
     {
@@ -184,22 +203,27 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             pixels[y * 16 + x] = blade ? new Color(0.28f, 0.38f, 0.2f, 1f) : Color.clear;
         }
         texture.SetPixels(pixels);
-        texture.Apply(false, true);
+        texture.Apply(false, false);
         return texture;
     }
 
     private static Texture2D NoiseTexture(Color color, float variation)
     {
-        var texture = new Texture2D(64, 64, TextureFormat.RGB24, false) { wrapMode = TextureWrapMode.Repeat };
+        var texture = new Texture2D(64, 64, TextureFormat.RGB24, true) { wrapMode = TextureWrapMode.Repeat };
         var pixels = new Color[64 * 64];
         var random = new System.Random(color.GetHashCode());
-        for (var i = 0; i < pixels.Length; i++)
+        var offsetX = (float)random.NextDouble() * 100f;
+        var offsetY = (float)random.NextDouble() * 100f;
+        for (var y = 0; y < 64; y++)
+        for (var x = 0; x < 64; x++)
         {
-            var value = ((float)random.NextDouble() - 0.5f) * variation;
-            pixels[i] = new Color(color.r + value, color.g + value, color.b + value);
+            var broad = Mathf.PerlinNoise(offsetX + x * 0.08f, offsetY + y * 0.08f) - 0.5f;
+            var fine = Mathf.PerlinNoise(offsetX + x * 0.28f, offsetY + y * 0.28f) - 0.5f;
+            var value = (broad * 0.75f + fine * 0.25f) * variation * 2f;
+            pixels[y * 64 + x] = new Color(color.r + value, color.g + value, color.b + value);
         }
         texture.SetPixels(pixels);
-        texture.Apply(false, true);
+        texture.Apply(true, true);
         return texture;
     }
 
@@ -225,7 +249,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return camera;
     }
 
-    private static void CreateLighting()
+    private static Light CreateLighting()
     {
         var lightObject = new GameObject("WinterSun");
         var light = lightObject.AddComponent<Light>();
@@ -251,6 +275,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         RenderSettings.ambientSkyColor = new Color(0.46f, 0.55f, 0.65f);
         RenderSettings.ambientEquatorColor = new Color(0.31f, 0.35f, 0.38f);
         RenderSettings.ambientGroundColor = new Color(0.14f, 0.16f, 0.18f);
+        return light;
     }
 
     private void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3[] sites)
@@ -277,16 +302,48 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             Object.Destroy(rock.GetComponent<Collider>());
         }
 
-        CreateBox("BaseHangar", home + new Vector3(-7f, 2.2f, 2f), new Vector3(8f, 4.4f, 7f), new Color(0.18f, 0.22f, 0.26f));
-        CreateBox("RescueCabin", sites[1] + new Vector3(4.5f, 1.6f, 4f), new Vector3(6f, 3.2f, 5f), new Color(0.28f, 0.18f, 0.12f), Quaternion.Euler(0f, -18f, 0f));
-        CreateBox("SnowRoof", sites[1] + new Vector3(4.5f, 3.3f, 4f), new Vector3(6.5f, 0.35f, 5.5f), new Color(0.86f, 0.89f, 0.91f), Quaternion.Euler(0f, -18f, 5f));
+        var hangar = home + new Vector3(-10f, 2.2f, -6f);
+        CreateBox("BaseHangar", hangar, new Vector3(8f, 4.4f, 7f), new Color(0.18f, 0.22f, 0.26f));
+        CreateBox("HangarDoor", hangar + new Vector3(4.04f, -0.5f, 0f), new Vector3(0.08f, 3.2f, 5.4f), new Color(0.055f, 0.065f, 0.075f));
+
+        var cabinRotation = Quaternion.Euler(0f, -18f, 0f);
+        var cabin = sites[1] + new Vector3(4.5f, 1.6f, 4f);
+        CreateBox("RescueCabin", cabin, new Vector3(6f, 3.2f, 5f), new Color(0.28f, 0.18f, 0.12f), cabinRotation);
+        CreateBox("SnowRoof", cabin + cabinRotation * new Vector3(-1.4f, 1.9f, 0f), new Vector3(3.5f, 0.3f, 5.6f), new Color(0.86f, 0.89f, 0.91f), cabinRotation * Quaternion.Euler(0f, 0f, 25f));
+        CreateBox("SnowRoof", cabin + cabinRotation * new Vector3(1.4f, 1.9f, 0f), new Vector3(3.5f, 0.3f, 5.6f), new Color(0.86f, 0.89f, 0.91f), cabinRotation * Quaternion.Euler(0f, 0f, -25f));
+        var cabinWindow = CreateBox("CabinWindow", cabin + cabinRotation * new Vector3(-1.25f, 0.2f, -2.53f), new Vector3(1.35f, 0.8f, 0.08f), new Color(1f, 0.72f, 0.38f), cabinRotation, true);
+        Object.Destroy(cabinWindow.GetComponent<Collider>());
+        var cabinDoor = CreateBox("CabinDoor", cabin + cabinRotation * new Vector3(1.55f, -0.45f, -2.54f), new Vector3(1.2f, 2.2f, 0.08f), new Color(0.08f, 0.09f, 0.1f), cabinRotation);
+        Object.Destroy(cabinDoor.GetComponent<Collider>());
         var antenna = CreateBox("EmergencyAntenna", sites[2] + Vector3.up * 3.5f, new Vector3(0.12f, 7f, 0.12f), new Color(0.25f, 0.28f, 0.3f));
         Object.Destroy(antenna.GetComponent<Collider>());
-        CreateBox("OldMineEntrance", sites[4] + new Vector3(0f, 1.7f, 2f), new Vector3(5f, 3.4f, 1f), new Color(0.08f, 0.09f, 0.1f));
-        CreateBox("WeatherStation", sites[5] + new Vector3(3f, 1.3f, 2f), new Vector3(4f, 2.6f, 4f), new Color(0.72f, 0.76f, 0.78f));
-        CreateBox("ForestShelter", sites[7] + new Vector3(-3f, 1.2f, 2f), new Vector3(4f, 2.4f, 3.5f), new Color(0.24f, 0.16f, 0.1f));
+
+        var mine = sites[4] + new Vector3(0f, 1.7f, 2f);
+        CreateBox("OldMineEntrance", mine, new Vector3(5f, 3.4f, 1f), new Color(0.08f, 0.09f, 0.1f));
+        CreateBox("MinePost", mine + new Vector3(-2.35f, 0f, -0.55f), new Vector3(0.35f, 3.8f, 0.35f), new Color(0.28f, 0.18f, 0.12f));
+        CreateBox("MinePost", mine + new Vector3(2.35f, 0f, -0.55f), new Vector3(0.35f, 3.8f, 0.35f), new Color(0.28f, 0.18f, 0.12f));
+        CreateBox("MineBeam", mine + new Vector3(0f, 1.75f, -0.55f), new Vector3(5.1f, 0.35f, 0.35f), new Color(0.28f, 0.18f, 0.12f));
+
+        var station = sites[5] + new Vector3(3f, 1.3f, 2f);
+        CreateBox("WeatherStation", station, new Vector3(4f, 2.6f, 4f), new Color(0.72f, 0.76f, 0.78f));
+        var dish = CreatePart(PrimitiveType.Sphere, staticScenery, station + new Vector3(0f, 2.25f, 0f), new Vector3(1.2f, 0.18f, 1.2f), new Color(0.72f, 0.76f, 0.78f), Quaternion.Euler(55f, 0f, 0f));
+        dish.name = "WeatherDish";
+        Object.Destroy(dish.GetComponent<Collider>());
+
+        var shelter = sites[7] + new Vector3(-3f, 1.2f, 2f);
+        CreateBox("ForestShelter", shelter, new Vector3(4f, 2.4f, 3.5f), new Color(0.24f, 0.16f, 0.1f));
+        CreateBox("ShelterRoof", shelter + Vector3.up * 1.35f, new Vector3(4.5f, 0.3f, 4f), new Color(0.86f, 0.89f, 0.91f), Quaternion.Euler(0f, 0f, -6f));
+        var shelterWindow = CreateBox("ShelterWindow", shelter + new Vector3(0f, 0.15f, -1.78f), new Vector3(1.1f, 0.65f, 0.08f), new Color(1f, 0.65f, 0.25f), Quaternion.identity, true);
+        Object.Destroy(shelterWindow.GetComponent<Collider>());
+
         var lake = CreateBox("FrozenLake", sites[3] + Vector3.down * 0.03f, new Vector3(15f, 0.08f, 12f), new Color(0.32f, 0.57f, 0.72f));
         Object.Destroy(lake.GetComponent<Collider>());
+        if (lake.GetComponent<Renderer>().sharedMaterial.HasProperty("_Smoothness")) lake.GetComponent<Renderer>().sharedMaterial.SetFloat("_Smoothness", 0.72f);
+        for (var crack = 0; crack < 3; crack++)
+        {
+            var iceCrack = CreateBox("IceCrack", sites[3] + new Vector3(crack * 2.2f - 2.2f, 0.02f, crack - 1f), new Vector3(5.5f, 0.025f, 0.08f), new Color(0.22f, 0.25f, 0.27f), Quaternion.Euler(0f, -28f + crack * 31f, 0f));
+            Object.Destroy(iceCrack.GetComponent<Collider>());
+        }
         var flare = new GameObject("EmergencyFlare");
         flare.transform.position = sites[1] + Vector3.up * 2f;
         var light = flare.AddComponent<Light>();
@@ -315,7 +372,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         Object.Destroy(trunk.GetComponent<Collider>());
     }
 
-    private GameObject CreateBox(string name, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default)
+    private GameObject CreateBox(string name, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default, bool glowing = false)
     {
         var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
         box.name = name;
@@ -323,7 +380,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         box.transform.position = position;
         box.transform.localScale = scale;
         box.transform.rotation = rotation == default ? Quaternion.identity : rotation;
-        box.GetComponent<Renderer>().sharedMaterial = SurfaceMaterial(color, 0.06f);
+        box.GetComponent<Renderer>().sharedMaterial = glowing ? GlowMaterial(color) : SurfaceMaterial(color, 0.06f);
         return box;
     }
 
@@ -338,18 +395,22 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return material;
     }
 
+    private Material GlowMaterial(Color color)
+    {
+        if (glowMaterials.TryGetValue(color, out var shared)) return shared;
+        var material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
+        material.color = color;
+        if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+        glowMaterials.Add(color, material);
+        return material;
+    }
+
     private GameObject CreateLandingLight(string name, Vector3 position, float diameter, Color color)
     {
         var zone = new GameObject(name);
         zone.transform.SetParent(staticScenery, false);
         zone.transform.position = position;
-        if (!glowMaterials.TryGetValue(color, out var material))
-        {
-            material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
-            material.color = color;
-            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
-            glowMaterials.Add(color, material);
-        }
+        var material = GlowMaterial(color);
         for (var i = 0; i < 16; i++)
         {
             var angle = i / 16f * Mathf.PI * 2f;
@@ -463,6 +524,28 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return package;
     }
 
+    private GameObject CreateFieldMarker()
+    {
+        var marker = new GameObject("FieldMarker");
+        marker.transform.SetParent(transform, false);
+        var pole = CreatePart(PrimitiveType.Cylinder, marker.transform, new Vector3(0f, 0.55f, 0f), new Vector3(0.07f, 0.55f, 0.07f), new Color(0.12f, 0.14f, 0.16f));
+        pole.name = "FieldMarkerPole";
+        Object.Destroy(pole.GetComponent<Collider>());
+        var beacon = CreatePart(PrimitiveType.Sphere, marker.transform, new Vector3(0f, 1.15f, 0f), Vector3.one * 0.18f, Orange);
+        beacon.name = "FieldBeacon";
+        beacon.GetComponent<Renderer>().sharedMaterial = GlowMaterial(Orange);
+        Object.Destroy(beacon.GetComponent<Collider>());
+        var light = new GameObject("FieldMarkerLight").AddComponent<Light>();
+        light.transform.SetParent(marker.transform, false);
+        light.transform.localPosition = new Vector3(0f, 1.15f, 0f);
+        light.type = LightType.Point;
+        light.color = Orange;
+        light.range = 10f;
+        light.intensity = 8f;
+        marker.SetActive(false);
+        return marker;
+    }
+
     private GameObject CreateRescueTarget(Vector3 position)
     {
         var person = GameObject.CreatePrimitive(PrimitiveType.Capsule);
@@ -475,6 +558,16 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return person;
     }
 
+    private Renderer CreateThermalTarget(Vector3 position)
+    {
+        var target = CreatePart(PrimitiveType.Capsule, transform, position, new Vector3(0.35f, 0.65f, 0.35f), Orange);
+        target.name = "ThermalTrace";
+        Object.Destroy(target.GetComponent<Collider>());
+        var renderer = target.GetComponent<Renderer>();
+        renderer.enabled = false;
+        return renderer;
+    }
+
     private static ParticleSystem CreateBlizzard(Transform viewer)
     {
         var stormObject = new GameObject("ProceduralBlizzard");
@@ -482,59 +575,55 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         stormObject.transform.localPosition = new Vector3(0f, 8f, 14f);
         var storm = stormObject.AddComponent<ParticleSystem>();
         var main = storm.main;
-        main.maxParticles = 900;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(1.7f, 3.2f);
-        main.startSpeed = new ParticleSystem.MinMaxCurve(8f, 14f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.025f, 0.08f);
-        main.startColor = new Color(0.9f, 0.94f, 1f, 0.85f);
+        main.maxParticles = 520;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(1.2f, 2.2f);
+        main.startSpeed = 0f;
+        main.startSize = new ParticleSystem.MinMaxCurve(0.025f, 0.085f);
+        main.startColor = new Color(0.9f, 0.94f, 1f, 0.72f);
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         var emission = storm.emission;
-        emission.rateOverTime = 75f;
+        emission.rateOverTime = 35f;
         var shape = storm.shape;
         shape.shapeType = ParticleSystemShapeType.Box;
-        shape.scale = new Vector3(45f, 18f, 45f);
-        shape.rotation = new Vector3(18f, 90f, 0f);
+        shape.scale = new Vector3(34f, 14f, 30f);
         var velocity = storm.velocityOverLifetime;
         velocity.enabled = true;
         velocity.space = ParticleSystemSimulationSpace.World;
-        velocity.x = new ParticleSystem.MinMaxCurve(-9f, -6f);
-        velocity.y = new ParticleSystem.MinMaxCurve(-5f, -2f);
-        velocity.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+        velocity.x = new ParticleSystem.MinMaxCurve(-0.35f, 0.35f);
+        velocity.y = new ParticleSystem.MinMaxCurve(-1.8f, -0.7f);
+        velocity.z = new ParticleSystem.MinMaxCurve(-0.35f, 0.35f);
         var noise = storm.noise;
         noise.enabled = true;
-        noise.strength = 1.5f;
-        noise.frequency = 0.35f;
+        noise.strength = 0.45f;
+        noise.frequency = 0.55f;
         var renderer = storm.GetComponent<ParticleSystemRenderer>();
-        renderer.renderMode = ParticleSystemRenderMode.Stretch;
-        renderer.lengthScale = 5f;
-        renderer.velocityScale = 0.12f;
+        renderer.renderMode = ParticleSystemRenderMode.Billboard;
         renderer.material = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit") ?? Shader.Find("Particles/Standard Unlit"));
         return storm;
     }
 
     private static void CreateHud(Camera camera, out Text status, out Text telemetry, out RectTransform horizon)
     {
-        var canvasObject = new GameObject("FpvHud");
-        var canvas = canvasObject.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceCamera;
-        canvas.worldCamera = camera;
-        canvas.planeDistance = 0.45f;
-        var scaler = canvasObject.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
-        scaler.matchWidthOrHeight = 0.5f;
+        var canvas = UiCanvas("FpvHud", camera);
+        var missionCanvas = UiCanvas("MissionHud", camera);
 
-        var statusPanel = UiImage(canvas.transform, "OperationsMenu", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(38f, -38f), new Vector2(700f, 350f), new Color(0.015f, 0.025f, 0.04f, 0.8f), new Vector2(0f, 1f));
-        status = UiText(statusPanel.transform, "StoryStatus", 31, Color.white, TextAnchor.UpperLeft);
+        var statusPanel = UiImage(missionCanvas.transform, "OperationsMenu", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(38f, -38f), new Vector2(800f, 420f), new Color(0.015f, 0.025f, 0.04f, 0.8f), new Vector2(0f, 1f));
+        status = UiText(statusPanel.transform, "StoryStatus", 27, Color.white, TextAnchor.UpperLeft);
         status.rectTransform.offsetMin = new Vector2(26f, 22f);
         status.rectTransform.offsetMax = new Vector2(-26f, -22f);
         var accent = UiImage(statusPanel.transform, "Accent", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(7f, 0f), Cyan, new Vector2(0f, 0.5f));
         accent.rectTransform.sizeDelta = new Vector2(7f, 0f);
 
-        var telemetryPanel = UiImage(canvas.transform, "TelemetryBar", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 26f), new Vector2(1390f, 100f), new Color(0.01f, 0.02f, 0.03f, 0.78f), new Vector2(0.5f, 0f));
-        telemetry = UiText(telemetryPanel.transform, "Telemetry", 26, Cyan, TextAnchor.MiddleCenter);
-        telemetry.rectTransform.offsetMin = new Vector2(18f, 8f);
-        telemetry.rectTransform.offsetMax = new Vector2(-18f, -8f);
+        var alertPanel = UiImage(canvas.transform, "AlertBar", Vector2.one, Vector2.one, new Vector2(-38f, -38f), new Vector2(520f, 58f), new Color(0.14f, 0.025f, 0.015f, 0.9f), Vector2.one);
+        telemetry = UiText(alertPanel.transform, "Telemetry", 28, Orange, TextAnchor.MiddleCenter);
+        telemetry.rectTransform.offsetMin = new Vector2(12f, 5f);
+        telemetry.rectTransform.offsetMax = new Vector2(-12f, -5f);
+
+        Gauge(canvas.transform, "Speed", -440f, Cyan);
+        Gauge(canvas.transform, "Altitude", -230f, Cyan);
+        Gauge(canvas.transform, "Battery", -20f, Cyan);
+        DirectionIndicator(canvas.transform, "Wind", 205f, Cyan);
+        DirectionIndicator(canvas.transform, "Navigation", 430f, Orange);
 
         var horizonObject = new GameObject("ArtificialHorizon");
         horizonObject.transform.SetParent(canvas.transform, false);
@@ -548,8 +637,22 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         Line(canvas.transform, new Vector2(0f, 0f), new Vector2(42f, 4f), Orange);
         Line(canvas.transform, new Vector2(-290f, 0f), new Vector2(70f, 3f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.55f));
         Line(canvas.transform, new Vector2(290f, 0f), new Vector2(70f, 3f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.55f));
-        foreach (var child in canvasObject.GetComponentsInChildren<Transform>())
-            child.gameObject.layer = LayerMask.NameToLayer("UI");
+        foreach (var root in new[] { canvas.transform, missionCanvas.transform })
+        foreach (var child in root.GetComponentsInChildren<Transform>()) child.gameObject.layer = LayerMask.NameToLayer("UI");
+    }
+
+    private static Canvas UiCanvas(string name, Camera camera)
+    {
+        var obj = new GameObject(name);
+        var canvas = obj.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceCamera;
+        canvas.worldCamera = camera;
+        canvas.planeDistance = 0.45f;
+        var scaler = obj.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.matchWidthOrHeight = 0.5f;
+        return canvas;
     }
 
     private static Image UiImage(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 position, Vector2 size, Color color, Vector2 pivot)
@@ -582,6 +685,30 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         text.rectTransform.anchorMin = Vector2.zero;
         text.rectTransform.anchorMax = Vector2.one;
         return text;
+    }
+
+    private static void Gauge(Transform parent, string name, float x, Color color)
+    {
+        var panel = UiImage(parent, name + "Gauge", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(x, 24f), new Vector2(190f, 88f), new Color(0.01f, 0.02f, 0.03f, 0.82f), new Vector2(0.5f, 0f));
+        var value = UiText(panel.transform, name + "Value", 22, Color.white, TextAnchor.MiddleCenter);
+        value.rectTransform.offsetMin = new Vector2(8f, 15f);
+        value.rectTransform.offsetMax = new Vector2(-8f, -4f);
+        var track = UiImage(panel.transform, name + "Track", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 10f), new Vector2(154f, 7f), new Color(color.r, color.g, color.b, 0.18f), new Vector2(0.5f, 0f));
+        UiImage(track.transform, name + "Fill", new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(154f, 7f), color, new Vector2(0f, 0.5f));
+    }
+
+    private static void DirectionIndicator(Transform parent, string name, float x, Color color)
+    {
+        var panel = UiImage(parent, name + "Gauge", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(x, 24f), new Vector2(205f, 88f), new Color(0.01f, 0.02f, 0.03f, 0.82f), new Vector2(0.5f, 0f));
+        var needle = UiText(panel.transform, name + "Needle", 34, color, TextAnchor.MiddleCenter);
+        needle.text = "▲";
+        needle.rectTransform.anchorMin = needle.rectTransform.anchorMax = new Vector2(0f, 0.5f);
+        needle.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        needle.rectTransform.anchoredPosition = new Vector2(42f, 0f);
+        needle.rectTransform.sizeDelta = new Vector2(44f, 44f);
+        var value = UiText(panel.transform, name + "Value", 20, Color.white, TextAnchor.MiddleCenter);
+        value.rectTransform.offsetMin = new Vector2(76f, 6f);
+        value.rectTransform.offsetMax = new Vector2(-8f, -6f);
     }
 
     private static void Line(Transform parent, Vector2 position, Vector2 size, Color color)

@@ -87,7 +87,7 @@ adb shell monkey -p com.yourstudio.dronejobs 1
 - 各話のベストスコアが個別にローカル保存される
 - 各話のベストスコアが救助ネットワークの完了数・準備率へ反映される
 - メニューで各話のクリア状況とベストスコアを確認できる
-- HUDのNAV左右指示だけで吹雪中も目標へ旋回できる
+- HUDのNAV矢印だけで吹雪中も目標へ旋回できる
 - 着陸後はHUDにモーター停止と再始動操作が表示される
 
 ### 快適性・性能
@@ -111,11 +111,11 @@ UnityエディタのGameビューはQuest実機の代替にならない。最終
 
 Unityの[視野外カリング](https://docs.unity3d.com/6000.0/Documentation/Manual/OcclusionCulling.html)と[静的バッチAPI](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/StaticBatchingUtility.html)を使用している。実行時生成シーンに対するベイク済み遮蔽カリングは導入していない。
 
-`python3 tools/validate_prototype.py`に加え、Unityを`-batchmode -nographics -projectPath <project> -executeMethod ProjectConfigurator.SmokePlayMode -logFile <log>`で起動すると、Play Modeで資源の共有、静的バッチ、個別の境界、動く部品の除外、FPVのレイヤーと画質設定を検証する。`RENDER CHECK`にマテリアル・テクスチャ・バッチ対象の数を出力する。GPUの描画時間はこの検証では測れないため、QuestのProfiler/Frame Debuggerで操縦者・FPV・追従、180度旋回、吹雪、サーマル切替を比較する。
+`python3 tools/validate_prototype.py`に加え、Unityを`-batchmode -projectPath <project> -executeMethod ProjectConfigurator.SmokePlayMode -logFile <log>`で起動すると、Play Modeで資源の共有、静的バッチ、個別の境界、動く部品の除外、FPVのレイヤーと画質設定を検証する。画面の黒転を検査するためGPU描画が必要で、`-nographics`は付けない。`RENDER CHECK`にマテリアル・テクスチャ・バッチ対象の数を出力する。GPUの描画時間はこの検証では測れないため、QuestのProfiler/Frame Debuggerで操縦者・FPV・追従、180度旋回、吹雪、サーマル切替を比較する。
 
-Unity 6000.6.0f1のPlay Modeで、MeshRendererは402個のまま、参照するマテリアルは264→31個、テクスチャは29→10個、静的バッチ対象は0→375個になった。この件数にはTerrain・吹雪・Canvas用の資源は含まれず、FPSや総メモリの改善率を示すものではない。
+Unity 6000.6.0f1のPlay Modeで、MeshRenderer 383個、共有マテリアル38個、共有テクスチャ12個、静的バッチ対象346個を確認した。この件数にはTerrain・吹雪・Canvas用の資源は含まれず、FPSや総メモリの改善率を示すものではない。
 
-検証時の制限：描画の全アサーションとPythonチェックは通過したが、Unity 6000.6.0f1のバッチ起動では`UnityEditor.Search.SearchDatabase.EnumerateAll`に`ArgumentOutOfRangeException`が発生し、スモークテスト全体は終了コード1になる。変更前とキャッシュなしの一時コピーでも再現した。Questでの見た目・FPS・総メモリ比較は未実施。
+検証時の制限：描画の全アサーション、Pythonチェック、Unity 6000.6.0f1のPlay Modeスモークは終了コード0で通過した。Questでの見た目・FPS・総メモリ比較は未実施。
 
 ## 4. リリース用ビルド
 

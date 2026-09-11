@@ -12,29 +12,27 @@ public sealed class FpvMonitor : MonoBehaviour
     private Camera fpvCamera;
     private RenderTexture feed;
     private GameObject panel;
-    private Color[] normalColors;
     private float nextRender;
     private bool thermal;
     private bool thermalAvailable;
+    private int thermalTarget = -1;
 
     public bool Thermal => thermal;
     public Transform Gimbal => fpvCamera.transform;
 
     public void Build(Camera viewer)
     {
-        normalColors = new Color[thermalTargets.Length];
-        for (var i = 0; i < thermalTargets.Length; i++)
-            normalColors[i] = thermalTargets[i] != null ? thermalTargets[i].material.color : Color.white;
+        foreach (var target in thermalTargets)
+            if (target != null) target.enabled = false;
 
         var cameraObject = new GameObject("FPVCamera");
         cameraObject.transform.SetParent(transform, false);
         fpvCamera = cameraObject.AddComponent<Camera>();
-        fpvCamera.stereoTargetEye = StereoTargetEyeMask.None;
-        fpvCamera.cullingMask &= ~LayerMask.GetMask("UI");
+        fpvCamera.cullingMask |= LayerMask.GetMask("UI");
         fpvCamera.fieldOfView = 84f;
         fpvCamera.nearClipPlane = 0.08f;
         fpvCamera.enabled = false;
-        feed = new RenderTexture(textureSize, textureSize, 16, RenderTextureFormat.ARGB32);
+        feed = new RenderTexture(textureSize, textureSize * 9 / 16, 16, RenderTextureFormat.ARGB32);
         feed.name = "FPVFeed";
         feed.antiAliasing = 2;
         feed.useMipMap = false;
@@ -46,9 +44,9 @@ public sealed class FpvMonitor : MonoBehaviour
         panel.name = "FPVMonitor";
         panel.layer = LayerMask.NameToLayer("UI");
         panel.transform.SetParent(viewer.transform, false);
-        panel.transform.localPosition = new Vector3(0.3f, -0.18f, 0.82f);
+        panel.transform.localPosition = new Vector3(0.38f, -0.2f, 0.95f);
         panel.transform.localRotation = Quaternion.identity;
-        panel.transform.localScale = new Vector3(0.62f, 0.62f, 0.62f);
+        panel.transform.localScale = new Vector3(0.52f, 0.52f * 9f / 16f, 0.52f);
         Object.Destroy(panel.GetComponent<Collider>());
         var material = new Material(Shader.Find("Unlit/Texture") ?? Shader.Find("Universal Render Pipeline/Unlit"));
         material.mainTexture = feed;
@@ -61,15 +59,14 @@ public sealed class FpvMonitor : MonoBehaviour
         if (!Application.isBatchMode && fpvCamera != null && panel.activeSelf && Time.unscaledTime >= nextRender)
         {
             nextRender = Time.unscaledTime + renderInterval;
+            panel.SetActive(false);
             fpvCamera.Render();
+            panel.SetActive(true);
         }
 
         if (!thermalAvailable || !QuestInput.Current.leftSecondaryDown) return;
         thermal = !thermal;
-        for (var i = 0; i < thermalTargets.Length; i++)
-        {
-            if (thermalTargets[i] != null) thermalTargets[i].material.color = thermal ? new Color(1f, 0.18f, 0.02f) : normalColors[i];
-        }
+        UpdateThermalTarget();
     }
 
     private void UpdateGimbal(bool snap)
@@ -91,15 +88,18 @@ public sealed class FpvMonitor : MonoBehaviour
         if (panel != null) panel.SetActive(visible);
     }
 
-    public void SetThermalAvailable(bool available)
+    public void SetThermalAvailable(bool available, int target = -1)
     {
         thermalAvailable = available;
-        if (available || !thermal) return;
-        thermal = false;
+        thermalTarget = available ? Mathf.Clamp(target, 0, thermalTargets.Length - 1) : -1;
+        if (!available) thermal = false;
+        UpdateThermalTarget();
+    }
+
+    private void UpdateThermalTarget()
+    {
         for (var i = 0; i < thermalTargets.Length; i++)
-        {
-            if (thermalTargets[i] != null) thermalTargets[i].material.color = normalColors[i];
-        }
+            if (thermalTargets[i] != null) thermalTargets[i].enabled = thermal && i == thermalTarget;
     }
 
     private void OnDestroy()

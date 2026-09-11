@@ -5,6 +5,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using UnityEngine.UI;
 
 public static class ProjectConfigurator
 {
@@ -35,6 +36,24 @@ public static class ProjectConfigurator
 
         GraphicsSettings.defaultRenderPipeline = pipeline;
         QualitySettings.renderPipeline = pipeline;
+        EnsureRuntimeShaders();
+    }
+
+    private static void EnsureRuntimeShaders()
+    {
+        if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
+        foreach (var entry in new[]
+                 {
+                     ("RuntimeLit", "Universal Render Pipeline/Lit"),
+                     ("RuntimeUnlit", "Universal Render Pipeline/Unlit"),
+                     ("RuntimeParticles", "Universal Render Pipeline/Particles/Unlit"),
+                     ("RuntimeSky", "Skybox/Procedural")
+                 })
+        {
+            var path = $"Assets/Resources/{entry.Item1}.mat";
+            if (AssetDatabase.LoadAssetAtPath<Material>(path) == null)
+                AssetDatabase.CreateAsset(new Material(Shader.Find(entry.Item2)), path);
+        }
     }
 
     public static void SmokePlayMode()
@@ -85,6 +104,13 @@ public static class ProjectConfigurator
         UnityEngine.Assertions.Assert.AreEqual(8, propellers.Length);
         UnityEngine.Assertions.Assert.AreEqual(1, propellers.Select(renderer => renderer.sharedMaterial).Distinct().Count());
         UnityEngine.Assertions.Assert.AreEqual(1, propellers.Select(renderer => renderer.GetComponent<MeshFilter>().sharedMesh).Distinct().Count());
+        var fieldMarker = renderers.Where(renderer => renderer.transform.parent != null && renderer.transform.parent.name == "FieldMarker").ToArray();
+        UnityEngine.Assertions.Assert.AreEqual(2, fieldMarker.Length);
+        UnityEngine.Assertions.Assert.IsTrue(fieldMarker.All(renderer => !renderer.gameObject.activeInHierarchy && !renderer.isPartOfStaticBatch));
+        UnityEngine.Assertions.Assert.AreEqual(3, renderers.Count(renderer => renderer.name == "IceCrack"));
+        UnityEngine.Assertions.Assert.AreEqual(2, renderers.Count(renderer => renderer.name == "MinePost"));
+        foreach (var name in new[] { "CabinWindow", "CabinDoor", "WeatherDish", "ShelterWindow" })
+            UnityEngine.Assertions.Assert.IsNotNull(GameObject.Find(name), name);
 
         var scenery = GameObject.Find("StaticScenery").GetComponentsInChildren<MeshRenderer>();
         UnityEngine.Assertions.Assert.IsTrue(scenery.Length > markers.Length);
@@ -94,17 +120,53 @@ public static class ProjectConfigurator
             UnityEngine.Assertions.Assert.IsTrue(renderer.bounds.size.magnitude < 25f, "Keep individual culling bounds");
         }
         var drone = Object.FindAnyObjectByType<DroneController>();
+        var distressReady = typeof(MissionController).GetMethod("DistressHoldReady", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        UnityEngine.Assertions.Assert.IsTrue((bool)distressReady.Invoke(null, new object[] { 8f, 1.99f }));
+        UnityEngine.Assertions.Assert.IsFalse((bool)distressReady.Invoke(null, new object[] { 8.01f, 1f }));
+        UnityEngine.Assertions.Assert.IsFalse((bool)distressReady.Invoke(null, new object[] { 5f, 2f }));
+        var freshSuccess = typeof(MissionController).GetMethod("HasFreshSuccess", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        UnityEngine.Assertions.Assert.IsTrue((bool)freshSuccess.Invoke(null, new object[] { 2, 2, 5, true, false }));
+        UnityEngine.Assertions.Assert.IsTrue((bool)freshSuccess.Invoke(null, new object[] { 5, 2, 5, false, true }));
+        UnityEngine.Assertions.Assert.IsFalse((bool)freshSuccess.Invoke(null, new object[] { 4, 2, 5, true, true }));
+        var shapeStick = typeof(DroneController).GetMethod("ShapeStick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        UnityEngine.Assertions.Assert.AreEqual(Vector2.zero, (Vector2)shapeStick.Invoke(drone, new object[] { new Vector2(0.02f, 0.02f) }));
+        var batteryLoad = typeof(DroneController).GetMethod("BatteryLoad", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        var hoverLoad = (float)batteryLoad.Invoke(null, new object[] { 0f, 0f, 0f });
+        UnityEngine.Assertions.Assert.IsTrue((float)batteryLoad.Invoke(null, new object[] { 0f, 3.6f, 1f }) > hoverLoad);
+        UnityEngine.Assertions.Assert.IsTrue((float)batteryLoad.Invoke(null, new object[] { 1f, 8f, 6f }) > hoverLoad);
+        UnityEngine.Assertions.Assert.AreEqual(3, drone.GetComponents<AudioSource>().Length);
+        drone.GetComponent<DronePresentation>().PlayWarning();
+        drone.GetComponent<DronePresentation>().PlaySuccess();
         foreach (var renderer in drone.GetComponentsInChildren<MeshRenderer>(true))
             UnityEngine.Assertions.Assert.IsFalse(renderer.isPartOfStaticBatch, "Moving parts must remain movable");
         UnityEngine.Assertions.Assert.IsFalse(GameObject.Find("RescueLeader").GetComponent<Renderer>().isPartOfStaticBatch);
+        var thermalTargets = Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None).Where(renderer => renderer.name == "ThermalTrace").ToArray();
+        UnityEngine.Assertions.Assert.AreEqual(8, thermalTargets.Length);
+        UnityEngine.Assertions.Assert.IsTrue(thermalTargets.All(renderer => !renderer.enabled && !renderer.isPartOfStaticBatch));
+        var monitor = Object.FindAnyObjectByType<FpvMonitor>();
+        monitor.SetThermalAvailable(true, 3);
+        typeof(FpvMonitor).GetField("thermal", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(monitor, true);
+        typeof(FpvMonitor).GetMethod("UpdateThermalTarget", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(monitor, null);
+        UnityEngine.Assertions.Assert.IsTrue(monitor.thermalTargets[3].enabled && monitor.thermalTargets.Count(renderer => renderer.enabled) == 1);
+        monitor.SetThermalAvailable(false);
+        UnityEngine.Assertions.Assert.IsTrue(monitor.thermalTargets.All(renderer => !renderer.enabled));
+        UnityEngine.Assertions.Assert.IsTrue(GameObject.Find("HomeBase").GetComponentInChildren<Light>().intensity > 18f);
 
         var viewer = Camera.main;
         var fpv = GameObject.Find("FPVCamera").GetComponent<Camera>();
+        var storm = Object.FindAnyObjectByType<ParticleSystem>();
+        UnityEngine.Assertions.Assert.AreEqual(520, storm.main.maxParticles);
+        UnityEngine.Assertions.Assert.AreEqual(ParticleSystemRenderMode.Billboard, storm.GetComponent<ParticleSystemRenderer>().renderMode);
+        var images = Object.FindObjectsByType<Image>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var name in new[] { "SpeedFill", "AltitudeFill", "BatteryFill" })
+            UnityEngine.Assertions.Assert.IsTrue(images.Any(image => image.name == name), name);
+        var texts = Object.FindObjectsByType<Text>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var name in new[] { "SpeedValue", "AltitudeValue", "BatteryValue", "WindNeedle", "NavigationNeedle" })
+            UnityEngine.Assertions.Assert.IsTrue(texts.Any(text => text.name == name), name);
         CheckPreview(viewer);
         var uiMask = LayerMask.GetMask("UI");
         UnityEngine.Assertions.Assert.AreEqual(0, fpv.cullingMask & uiMask);
         UnityEngine.Assertions.Assert.IsTrue((viewer.cullingMask & uiMask) != 0);
-        UnityEngine.Assertions.Assert.AreEqual(StereoTargetEyeMask.None, fpv.stereoTargetEye);
         UnityEngine.Assertions.Assert.IsFalse(fpv.enabled);
         foreach (var root in new[] { viewer.transform, GameObject.Find("FpvHud").transform })
         foreach (var child in root.GetComponentsInChildren<Transform>(true))

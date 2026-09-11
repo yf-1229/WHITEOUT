@@ -11,6 +11,9 @@ public sealed class DroneController : MonoBehaviour
     public float yawTorque = 1.8f;
     public float maxTiltDegrees = 28f;
     public float maxHorizontalSpeed = 8f;
+    [Range(0f, 0.3f)] public float stickDeadzone = 0.08f;
+    [Range(0f, 1f)] public float stickExpo = 0.35f;
+    public float motorResponse = 5f;
     public float batterySeconds = 360f;
     public float geofenceWarningDistance = 330f;
     public float geofenceReturnDistance = 390f;
@@ -30,6 +33,7 @@ public sealed class DroneController : MonoBehaviour
     private Vector3 homePosition;
     private float returnAltitude;
     private float targetYaw;
+    private float manualLift = 1f;
     private float batteryDrainMultiplier = 1f;
     private const float CrashSpeed = 6f;
 
@@ -63,6 +67,7 @@ public sealed class DroneController : MonoBehaviour
         ReturningHome = false;
         returnAltitude = home.y + 45f;
         targetYaw = 0f;
+        manualLift = 1f;
         GeofenceWarning = false;
     }
 
@@ -108,9 +113,10 @@ public sealed class DroneController : MonoBehaviour
         if (!MotorsArmed) return;
         var input = QuestInput.Current;
         var dt = Time.fixedDeltaTime;
-        var left = Vector2.ClampMagnitude(input.leftStick, 1f);
-        var right = Vector2.ClampMagnitude(input.rightStick, 1f);
+        var left = ShapeStick(input.leftStick);
+        var right = ShapeStick(input.rightStick);
         var throttle = Mathf.Abs(left.y);
+        var horizontal = new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z);
         var homeDistance = Vector3.Distance(transform.position, homePosition);
         GeofenceWarning = homeDistance > geofenceWarningDistance;
         if (homeDistance > geofenceReturnDistance && !ReturningHome)
@@ -119,7 +125,7 @@ public sealed class DroneController : MonoBehaviour
             ReturningHome = true;
         }
 
-        batterySeconds = Mathf.Max(0f, batterySeconds - dt * (0.55f + throttle * 0.9f) * batteryDrainMultiplier);
+        batterySeconds = Mathf.Max(0f, batterySeconds - dt * BatteryLoad(throttle, horizontal.magnitude, Wind.magnitude) * batteryDrainMultiplier);
         if (batterySeconds <= 0f)
         {
             Crashed = true;
@@ -131,7 +137,6 @@ public sealed class DroneController : MonoBehaviour
         if (ReturningHome) ApplyReturnHome(dt);
         else ApplyFlight(left, right, dt);
         if (!MotorsArmed) return;
-        var horizontal = new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z);
         var gust = 1f + Mathf.Sin(Time.time * 0.73f + transform.position.z * 0.04f) * 0.25f;
         body.AddForce((Wind * gust - horizontal) * 0.22f, ForceMode.Acceleration);
 
@@ -151,10 +156,23 @@ public sealed class DroneController : MonoBehaviour
         }
         else
         {
-            body.AddForce(transform.up * Physics.gravity.magnitude * (1f + left.y * 0.8f), ForceMode.Acceleration);
+            manualLift = Mathf.Lerp(manualLift, 1f + left.y * 0.8f, 1f - Mathf.Exp(-motorResponse * dt));
+            body.AddForce(transform.up * Physics.gravity.magnitude * manualLift, ForceMode.Acceleration);
             body.AddRelativeTorque(new Vector3(-right.y * manualTorque, left.x * yawTorque, -right.x * manualTorque), ForceMode.Acceleration);
         }
     }
+
+    private Vector2 ShapeStick(Vector2 input)
+    {
+        input = Vector2.ClampMagnitude(input, 1f);
+        var magnitude = input.magnitude;
+        if (magnitude <= stickDeadzone) return Vector2.zero;
+        magnitude = Mathf.InverseLerp(stickDeadzone, 1f, magnitude);
+        return input.normalized * Mathf.Lerp(magnitude, magnitude * magnitude * magnitude, stickExpo);
+    }
+
+    private static float BatteryLoad(float throttle, float speed, float wind)
+        => 0.65f + Mathf.Clamp01(throttle) * 0.55f + Mathf.Clamp01(speed / 8f) * 0.35f + Mathf.Clamp01(wind / 6f) * 0.15f;
 
     private void ApplyReturnHome(float dt)
     {
@@ -200,8 +218,10 @@ public sealed class DroneController : MonoBehaviour
     private void OnCollisionEnter(Collision collision)
     {
         if (Crashed || collision.relativeVelocity.magnitude < 0.4f) return;
+        var impact = collision.relativeVelocity.magnitude;
         CollisionCount++;
-        if (collision.relativeVelocity.magnitude < CrashSpeed) return;
+        QuestInput.PulseRight(Mathf.Clamp01(impact / CrashSpeed) * 0.45f, 0.08f);
+        if (impact < CrashSpeed) return;
         Crashed = true;
         MotorsArmed = false;
         QuestInput.PulseRight(0.8f, 0.3f);

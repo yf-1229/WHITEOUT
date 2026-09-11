@@ -5,6 +5,7 @@ public sealed class ViewController : MonoBehaviour
     public DroneController drone;
     public QuestPoseDriver pose;
     public FpvMonitor monitor;
+    public Canvas hud;
     public ViewMode CurrentMode { get; private set; } = ViewMode.Operator;
 
     private Vector3 operatorPosition;
@@ -12,9 +13,11 @@ public sealed class ViewController : MonoBehaviour
     private Vector3 chasePosition;
     private Quaternion chaseRotation;
     private GameObject comfortFrame;
+    private Camera viewerCamera;
 
     public void Build(Camera viewer)
     {
+        viewerCamera = viewer;
         operatorPosition = pose.trackingOrigin;
         operatorRotation = pose.trackingRotation;
         chasePosition = operatorPosition;
@@ -53,6 +56,7 @@ public sealed class ViewController : MonoBehaviour
         CurrentMode = mode;
         PlayerPrefs.SetInt("viewMode", (int)mode);
         monitor.SetPanelVisible(mode == ViewMode.Operator);
+        hud.worldCamera = mode == ViewMode.Operator ? monitor.Gimbal.GetComponent<Camera>() : viewerCamera;
         if (comfortFrame != null) comfortFrame.SetActive(mode != ViewMode.Operator);
         if (mode == ViewMode.Chase)
         {

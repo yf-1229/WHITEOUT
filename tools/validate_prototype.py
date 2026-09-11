@@ -31,6 +31,7 @@ guid = next(line.split(":", 1)[1].strip() for line in bootstrap_meta.splitlines(
 assert f"guid: {guid}" in scene
 
 player_settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text()
+assert "  productName: WHITEOUT\n" in player_settings
 assert "  activeInputHandler: 1\n" in player_settings
 assert "  defaultScreenWidth: 1920\n" in player_settings
 assert "  defaultScreenHeight: 1080\n" in player_settings
@@ -66,6 +67,12 @@ story_codes = re.findall(r'S\("(\d{2})",', catalog_source)
 assert len(story_codes) == 24
 assert len(set(story_codes)) == len(story_codes)
 assert story_codes == [f"{number:02}" for number in range(1, 25)]
+story_texts = re.findall(r'S\("\d{2}", "[^"]+", "([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)"', catalog_source)
+assert len(story_texts) == len(story_codes)
+for briefing, route_one, route_two, _, success in story_texts:
+    assert "\\n" in briefing
+    assert "。" in route_one and "。" in route_two and "。" in success
+assert catalog_source.count("：「") >= 5
 for token in ("StoryAction.Deliver", "StoryAction.Scan", "StoryAction.Relay", "StoryAction.Mark", "holdSeconds"):
     assert token in catalog_source
 sites = [(24, 90), (102, 186), (-102, 204), (150, 60), (-156, 120), (-15, 258), (162, 225), (-90, 54)]
@@ -77,26 +84,38 @@ for story_index, route in enumerate(routes):
         distress_site = (distress_site + 1) % len(sites)
     assert distress_site not in route
 assert {story_index % 4 for story_index in range(len(story_codes))} == {0, 1, 2, 3}
+mission_speed = 3.6
 estimated_durations = []
 for route in routes:
     points = [(0, -4), *(sites[index] for index in route), (0, -4)]
-    estimated_seconds = sum(math.dist(start, end) for start, end in zip(points, points[1:])) / 2.7 + 20
+    estimated_seconds = sum(math.dist(start, end) for start, end in zip(points, points[1:])) / mission_speed + 20
     estimated_durations.append(estimated_seconds)
-    assert 210 <= estimated_seconds <= 370, (route, estimated_seconds)
+    assert 165 <= estimated_seconds <= 280, (route, estimated_seconds)
 
 bootstrap_source = (ROOT / "Assets/Scripts/PrototypeBootstrap.cs").read_text()
-for token in ("CreateMountainTerrain", "TerrainData", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ArtificialHorizon", "missionSites", "FrozenLake", "OldMineEntrance", "WeatherStation", "ForestShelter", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
+for token in ("CreateMountainTerrain", "TerrainData", "windSnow", "windPack", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ParticleSystemRenderMode.Billboard", "ArtificialHorizon", "Gauge(canvas.transform", "DirectionIndicator", 'name + "Fill"', 'name + "Needle"', "missionSites", "FrozenLake", "IceCrack", "OldMineEntrance", "MinePost", "WeatherStation", "WeatherDish", "ForestShelter", "ShelterWindow", "CabinWindow", "CabinDoor", "GlowMaterial", "CreateFieldMarker", "FieldBeacon", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
     assert token in bootstrap_source
 assert "XRSettings.eyeTextureResolutionScale = 1f;" in bootstrap_source
 assert "package.AddComponent<Rigidbody>()" in bootstrap_source
+assert "texture.Apply(false, false);" in bootstrap_source
 
 mission_source = (ROOT / "Assets/Scripts/MissionController.cs").read_text()
-for token in ("STORY FLIGHT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "MOTORS OFF / B ARM", "NAV {navigation}", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
+for token in ("STORY FLIGHT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "MOTORS OFF  /  B ARM", "AGL\\n{groundClearance", "NAV\\n{distance", "speedFill.rectTransform.localScale", "navigationNeedle.localRotation", "telemetryText.transform.parent.gameObject.SetActive", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
     assert token in mission_source
-for token in ("RefreshCampaignProgress", "救助ネットワーク", "networkReadiness", "completedStories"):
+for token in ("RefreshCampaignProgress", "FindUnlockedStory", "unlockedStory", "救助ネットワーク", "networkReadiness", "completedStories"):
     assert token in mission_source
-for token in ("DistressSiteFor", "distressOfferUntil", "OPTIONAL RESCUE", "UpdateHazards", "CROSSWIND", "ROTOR", "UpdatePackageSway", "DeliveryReady", "ApplyWorldProgress", "PILOT STYLE"):
+assert "SelectedStory + direction + unlockedStory + 1" in mission_source
+for token in ("DistressSiteFor", "DistressHoldSeconds", "DistressHoldReady", "HasFreshSuccess", "distressOfferUntil", "OPTIONAL RESCUE", "UpdateHazards", "CROSSWIND", "ROTOR", "UpdatePackageSway", "DeliveryReady", "ApplyWorldProgress", "UpdateObjectiveLights", "restoredSites", "PILOT STYLE"):
     assert token in mission_source
+assert "actionProgress >= DistressHoldSeconds" in mission_source and "body.linearVelocity.magnitude" in mission_source
+assert "UpdateObjectiveLights(navigationAvailable ? objective : null);" in mission_source
+assert "flow.x - 0.35f" in mission_source and "Mathf.Lerp(35f, 240f, strength)" in mission_source
+assert "lastResult.collisions" in mission_source and "lastResult.jobPenalty" in mission_source
+assert "windZone != previousWindZone" in mission_source and "turbulencePulseAfter" in mission_source
+assert "clearance < 3f" in mission_source and "terrainWarningAfter" in mission_source and '"PULL UP"' in mission_source
+assert "Story.action == StoryAction.Deliver ? DeliveryReady() : stable" in mission_source
+assert "fieldMarker.position = markerPosition" in mission_source and "fieldMarker.gameObject.SetActive(true)" in mission_source
+assert "!lowBatteryWarned && drone.BatteryPercent < 20f" in mission_source
 for token in ("CLOSING WEATHER", "WEAK BATTERY", "NAV INTERFERENCE", "UNSTABLE AIR"):
     assert token in mission_source
 assert mission_source.count("drone.BeginMission(homePad.position);") == 3
@@ -108,22 +127,43 @@ assert "drone.BeginMission(homePad.position);" in start_story
 assert "drone.BeginMission(homePad.position);" in enter_idle
 
 fpv_source = (ROOT / "Assets/Scripts/FpvMonitor.cs").read_text()
-for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlane"):
+for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlane", "thermalTarget", "UpdateThermalTarget", "thermalTargets[i].enabled = thermal && i == thermalTarget"):
     assert token in fpv_source
+assert "SetThermalAvailable(Story.action == StoryAction.Scan, Story.targetSite)" in mission_source
 
 drone_source = (ROOT / "Assets/Scripts/DroneController.cs").read_text()
 for token in ("MotorsArmed", "ResetToIdle", "SetFlightMode", "ApplyReturnHome", "ApplyAssistedFlight", "ApplyAttitude", "maxTiltDegrees", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
     assert token in drone_source
+for token in ("stickDeadzone", "stickExpo", "motorResponse", "ShapeStick", "manualLift", "BatteryLoad", "horizontal.magnitude", "Wind.magnitude"):
+    assert token in drone_source
+assert "Mathf.Clamp01(impact / CrashSpeed) * 0.45f" in drone_source
 assert "SetBatteryDrain" in drone_source
 assert "public bool MotorsArmed { get; private set; }\n" in drone_source
 assert drone_source.count("MotorsArmed = true;") == 2
 assert "body.linearVelocity = new Vector3(horizontal.x" not in drone_source
 
+presentation_source = (ROOT / "Assets/Scripts/DronePresentation.cs").read_text()
+for token in ("CreateWindLoop", "ProceduralWind", "drone.Wind.magnitude", "wind.volume", "CreateCue", "RadioWarning", "RadioSuccess", "PlayWarning", "PlaySuccess"):
+    assert token in presentation_source
+assert mission_source.count("presentation.PlayWarning();") == 4
+assert mission_source.count("presentation.PlaySuccess();") == 3
+
 assert 'camera.clearFlags = CameraClearFlags.Skybox;' in bootstrap_source
 assert 'Shader.Find("Skybox/Procedural")' in bootstrap_source
+assert "Mathf.Pow(1f - Mathf.Abs" in bootstrap_source
+assert "AlpinePeak" in bootstrap_source
+assert "CreateThermalTarget" in bootstrap_source
+assert "texture.Apply(true, true);" in bootstrap_source
+for value in ("snow.smoothness = 0.18f", "windSnow.smoothness = 0.3f", "rock.smoothness = 0.04f"):
+    assert value in bootstrap_source
+
+for token in ("ACT I  WHITEOUT", "ACT II  VOICES", "ACT III  BREAKING POINT", "ACT IV  FIRST LIGHT", "distressMissed", "DistressOutcome", "sun.color"):
+    assert token in mission_source
 
 configurator_source = (ROOT / "Assets/Editor/ProjectConfigurator.cs").read_text()
 assert '"Game preview rendered black"' in configurator_source
+for shader in ("Universal Render Pipeline/Lit", "Universal Render Pipeline/Unlit", "Universal Render Pipeline/Particles/Unlit", "Skybox/Procedural"):
+    assert shader in configurator_source
 
 view_source = (ROOT / "Assets/Scripts/ViewController.cs").read_text()
 assert "Application.isEditor ? ViewMode.Operator" in view_source
