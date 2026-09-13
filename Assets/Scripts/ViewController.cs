@@ -6,6 +6,7 @@ public sealed class ViewController : MonoBehaviour
     public QuestPoseDriver pose;
     public FpvMonitor monitor;
     public Canvas hud;
+    public Canvas missionHud;
     public ViewMode CurrentMode { get; private set; } = ViewMode.Operator;
 
     private Vector3 operatorPosition;
@@ -23,7 +24,7 @@ public sealed class ViewController : MonoBehaviour
         chasePosition = operatorPosition;
         chaseRotation = operatorRotation;
         comfortFrame = CreateComfortFrame(viewer.transform);
-        SetMode(Application.isEditor ? ViewMode.Operator : (ViewMode)Mathf.Clamp(PlayerPrefs.GetInt("viewMode", 0), 0, 2));
+        SetMode(ViewMode.Operator);
     }
 
     private void Update()
@@ -51,13 +52,16 @@ public sealed class ViewController : MonoBehaviour
         }
     }
 
+    public void CycleMode() => SetMode((ViewMode)(((int)CurrentMode + 1) % 3));
+
     private void SetMode(ViewMode mode)
     {
         CurrentMode = mode;
         PlayerPrefs.SetInt("viewMode", (int)mode);
         monitor.SetPanelVisible(mode == ViewMode.Operator);
         hud.worldCamera = mode == ViewMode.Operator ? monitor.Gimbal.GetComponent<Camera>() : viewerCamera;
-        if (comfortFrame != null) comfortFrame.SetActive(mode != ViewMode.Operator);
+        missionHud.gameObject.SetActive(mode == ViewMode.Operator);
+        if (comfortFrame != null) comfortFrame.SetActive(mode == ViewMode.Chase);
         if (mode == ViewMode.Chase)
         {
             var forward = Vector3.ProjectOnPlane(monitor.Gimbal.forward, Vector3.up).normalized;
@@ -70,7 +74,7 @@ public sealed class ViewController : MonoBehaviour
     {
         var frame = new GameObject("ComfortFrame");
         frame.transform.SetParent(viewer, false);
-        var material = new Material(Shader.Find("Unlit/Color") ?? Shader.Find("Universal Render Pipeline/Unlit"));
+        var material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
         material.color = new Color(0.015f, 0.02f, 0.025f);
         AddBar(frame.transform, material, new Vector3(0f, 0.43f, 0.85f), new Vector3(1.2f, 0.06f, 0.04f));
         AddBar(frame.transform, material, new Vector3(0f, -0.43f, 0.85f), new Vector3(1.2f, 0.06f, 0.04f));

@@ -93,49 +93,65 @@ for route in routes:
     assert 165 <= estimated_seconds <= 280, (route, estimated_seconds)
 
 bootstrap_source = (ROOT / "Assets/Scripts/PrototypeBootstrap.cs").read_text()
-for token in ("CreateMountainTerrain", "TerrainData", "windSnow", "windPack", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateBlizzard", "ParticleSystemRenderMode.Billboard", "ArtificialHorizon", "Gauge(canvas.transform", "DirectionIndicator", 'name + "Fill"', 'name + "Needle"', "missionSites", "FrozenLake", "IceCrack", "OldMineEntrance", "MinePost", "WeatherStation", "WeatherDish", "ForestShelter", "ShelterWindow", "CabinWindow", "CabinDoor", "GlowMaterial", "CreateFieldMarker", "FieldBeacon", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingGlow", "BrushlessMotor", "GimbalCamera"):
+for token in ("CreateMountainTerrain", "TerrainData", "windSnow", "windPack", "AddAlpineGrass", "CreateAlpineEnvironment", "CreateDistantMountains", "DistantScenery", "DistantMountain", "DistantMountainMesh", "subMeshCount = 3", "faces[material].AddRange", "CreateRescueTrail", "RescueTrailMesh", "CreateFirMesh", "SnowFirMesh", "AddFirLayer", "CapsuleCollider", "collider.radius = 0.75f", "generatedMeshes", "CreateBlizzard", "ParticleSystemRenderMode.Billboard", "ArtificialHorizon", "ThermalOverlay", "UiCanvas", "MissionHud", "RadioCaption", "RadioSubtitle", "BriefingHeader", "BriefingUplink", "BriefingIndex", "BriefingFooter", "Gauge(canvas.transform", "DirectionIndicator", 'name + "Label"', 'name + "Track"', 'name + "Fill"', 'name + "Needle"', "missionSites", "FrozenLake", "IceCrack", "OldMineEntrance", "MinePost", "WeatherStation", "WeatherDish", "ForestShelter", "ShelterWindow", "CabinWindow", "CabinDoor", "GlowMaterial", "CreateFieldMarker", "FieldBeacon", "CreateRescueTarget", "RescueSignal", "EmergencyBlanket", "DronePresentation", "AudioListener", "ScreenSpaceCamera", "CanvasScaler", "CreateLandingLight", "LandingMark", "LandingPad", "LandingPadCenter", "HomeMark", "BrushlessMotor", "GimbalCamera"):
     assert token in bootstrap_source
 assert "XRSettings.eyeTextureResolutionScale = 1f;" in bootstrap_source
 assert "package.AddComponent<Rigidbody>()" in bootstrap_source
 assert "texture.Apply(false, false);" in bootstrap_source
+assert "CreateBlizzard(monitor.Gimbal)" in bootstrap_source
+assert "CreateViewer(OnTerrain(terrain, homePosition" in bootstrap_source
+assert "navigationLight.intensity = 0.15f" in bootstrap_source
+assert "float surfaceOffset = 0f" in bootstrap_source
+assert "groundSites[i].y - sitePositions[i].y" in bootstrap_source
+assert "TerrainNormal" in bootstrap_source and "GetInterpolatedNormal" in bootstrap_source
+assert 'new GameObject("LandingSurface")' in bootstrap_source and "Quaternion.FromToRotation" in bootstrap_source
 
 mission_source = (ROOT / "Assets/Scripts/MissionController.cs").read_text()
-for token in ("STORY FLIGHT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "MOTORS OFF  /  B ARM", "AGL\\n{groundClearance", "NAV\\n{distance", "speedFill.rectTransform.localScale", "navigationNeedle.localRotation", "telemetryText.transform.parent.gameObject.SetActive", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
+for token in ("DRONE RESCUE", "START FLIGHT", "PRACTICE RANGE", "FLIGHT SCHOOL", "FREE FLIGHT", "STABILIZATION", "SELF-LEVEL", "UpdateMenuButtons", "ActivateMenuSelection", "MissionCard", "Intel", "Speak", "AFTER ACTION REPORT", "StoryCatalog.All", "SelectStory", "BestKey", "missionCruiseSpeed", "StoryStage.Route", "StoryStage.Objective", "StoryStage.ReturnHome", "STANDBY  /  SELECT FLIGHT", "MOTORS OFF  /  B ARM", "RTH  /  AUTO LANDING", "headingValue", "speedFill.rectTransform.localScale", "navigationNeedle.localRotation", "telemetryText.transform.parent.gameObject.SetActive", "radioText.transform.parent.gameObject.SetActive", "abortConfirmationUntil", "もう一度で中止", "Y / M サーマル", "MISSION COMPLETE", "NEXT STORY"):
     assert token in mission_source
-for token in ("RefreshCampaignProgress", "FindUnlockedStory", "unlockedStory", "救助ネットワーク", "networkReadiness", "completedStories"):
+for token in ("RefreshCampaignProgress", "FindUnlockedStory", "unlockedStory", "NETWORK", "networkReadiness", "completedStories", "siteRestored", "recoveryWindows", "UpdateRecoveryWindows", "RecoveryColor"):
     assert token in mission_source
 assert "SelectedStory + direction + unlockedStory + 1" in mission_source
-for token in ("DistressSiteFor", "DistressHoldSeconds", "DistressHoldReady", "HasFreshSuccess", "distressOfferUntil", "OPTIONAL RESCUE", "UpdateHazards", "CROSSWIND", "ROTOR", "UpdatePackageSway", "DeliveryReady", "ApplyWorldProgress", "UpdateObjectiveLights", "restoredSites", "PILOT STYLE"):
+for token in ("DistressSiteFor", "DistressHoldSeconds", "DistressHoldReady", "ActionHoldReady", "ActionReady", "DROP READY", "MARK READY", "STABILIZE", "THERMAL OFF", "distressOfferUntil", "rescueTarget", "ShowRescueTarget", "OPTIONAL RESCUE", "UpdateHazards", "CROSSWIND", "ROTOR", "UpdatePackageSway", "DeliveryReady", "UpdateObjectiveLights", "PILOT STYLE"):
     assert token in mission_source
 assert "actionProgress >= DistressHoldSeconds" in mission_source and "body.linearVelocity.magnitude" in mission_source
 assert "UpdateObjectiveLights(navigationAvailable ? objective : null);" in mission_source
+assert "Quaternion.Euler(0f, 0f, -roll)" in mission_source
 assert "flow.x - 0.35f" in mission_source and "Mathf.Lerp(35f, 240f, strength)" in mission_source
+assert "ambientEquatorColor" in mission_source and "ambientGroundColor" in mission_source and "ambientDimmer" in mission_source
+assert '"THREAT"' not in mission_source
 assert "lastResult.collisions" in mission_source and "lastResult.jobPenalty" in mission_source
 assert "windZone != previousWindZone" in mission_source and "turbulencePulseAfter" in mission_source
 assert "clearance < 3f" in mission_source and "terrainWarningAfter" in mission_source and '"PULL UP"' in mission_source
-assert "Story.action == StoryAction.Deliver ? DeliveryReady() : stable" in mission_source
+assert "ActionReady(Story.action, close, stable, DeliveryReady())" in mission_source
+assert "Story.action != StoryAction.Scan || fpv.Thermal" in mission_source
+for token in ("ActionIndicator", "ActionLabel", "ActionTrack", "ActionFill"):
+    assert token in bootstrap_source
 assert "fieldMarker.position = markerPosition" in mission_source and "fieldMarker.gameObject.SetActive(true)" in mission_source
 assert "!lowBatteryWarned && drone.BatteryPercent < 20f" in mission_source
 for token in ("CLOSING WEATHER", "WEAK BATTERY", "NAV INTERFERENCE", "UNSTABLE AIR"):
     assert token in mission_source
-assert mission_source.count("drone.BeginMission(homePad.position);") == 3
+assert mission_source.count("drone.BeginMission(homePad.position);") == 2
 active_flow = mission_source.split("else if (State == MissionState.Active)", 1)[1].split("else if (input.rightPrimaryDown)", 1)[0]
 assert "input.leftPrimaryDown" in active_flow and "Time.unscaledTime < abortConfirmationUntil" in active_flow and "EnterFreeFlight();" in active_flow
 start_story = mission_source.split("private void StartStory()", 1)[1].split("private void UpdateStory", 1)[0]
 enter_idle = mission_source.split("private void EnterFreeFlight()", 1)[1].split("private void CompleteStory", 1)[0]
 assert "drone.BeginMission(homePad.position);" in start_story
-assert "drone.BeginMission(homePad.position);" in enter_idle
+assert "drone.SetStandby(homePad.position);" in enter_idle
 
 fpv_source = (ROOT / "Assets/Scripts/FpvMonitor.cs").read_text()
-for token in ("gimbalPositionResponse", "gimbalRotationResponse", "ProjectOnPlane", "thermalTarget", "UpdateThermalTarget", "thermalTargets[i].enabled = thermal && i == thermalTarget"):
+for token in ("cameraOffset", "cameraTiltDegrees", "TransformPoint", "drone.transform.rotation", "SetPositionAndRotation", "thermalTarget", "UpdateThermalTarget", "thermalTargets[i].enabled = thermal && i == thermalTarget", "textureSize * 9 / 16", "panel.SetActive(false)", "fpvCamera.Render()"):
     assert token in fpv_source
 assert "SetThermalAvailable(Story.action == StoryAction.Scan, Story.targetSite)" in mission_source
+assert "thermalOverlay.enabled = fpv.Thermal" in mission_source
 
 drone_source = (ROOT / "Assets/Scripts/DroneController.cs").read_text()
-for token in ("MotorsArmed", "ResetToIdle", "SetFlightMode", "ApplyReturnHome", "ApplyAssistedFlight", "ApplyAttitude", "maxTiltDegrees", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
+for token in ("MotorsArmed", "SetStandby", "IsStandby", "ResetToIdle", "SetFlightMode", "ApplyReturnHome", "SafeReturnAltitude", "terrain.SampleHeight", "+ 12f", "ApplyAssistedFlight", "ApplyAttitude", "maxTiltDegrees", "homePosition.y + 0.5f", "returnAltitude", "planar.magnitude > 20f"):
     assert token in drone_source
-for token in ("stickDeadzone", "stickExpo", "motorResponse", "ShapeStick", "manualLift", "BatteryLoad", "horizontal.magnitude", "Wind.magnitude"):
+for token in ("stickDeadzone", "stickExpo", "motorResponse", "ShapeStick", "manualLift", "ManualRateTarget", "manualRateDegrees", "manualYawRateDegrees", "manualRateGain", "Quaternion.Inverse(body.rotation)", "BatteryLoad", "MotorLoad", "AssistedMotorLoad", "ApplyAssistStabilization", "assistTiltRecovery", "body.rotation * Vector3.up", "RigidbodyInterpolation.None", "SetPositionAndRotation", "horizontal.magnitude", "Wind.magnitude"):
     assert token in drone_source
+assert "home + Vector3.up * 0.65f" in drone_source
+assert "Vector3.Dot(bodyUp, Vector3.up) < 0.3f" in drone_source
 assert "Mathf.Clamp01(impact / CrashSpeed) * 0.45f" in drone_source
 assert "SetBatteryDrain" in drone_source
 assert "public bool MotorsArmed { get; private set; }\n" in drone_source
@@ -143,7 +159,7 @@ assert drone_source.count("MotorsArmed = true;") == 2
 assert "body.linearVelocity = new Vector3(horizontal.x" not in drone_source
 
 presentation_source = (ROOT / "Assets/Scripts/DronePresentation.cs").read_text()
-for token in ("CreateWindLoop", "ProceduralWind", "drone.Wind.magnitude", "wind.volume", "CreateCue", "RadioWarning", "RadioSuccess", "PlayWarning", "PlaySuccess"):
+for token in ("CreateWindLoop", "ProceduralWind", "drone.Wind.magnitude", "drone.MotorLoad", "load * 520f", "motor.pitch", "motor.volume", "wind.volume", "CreateCue", "RadioWarning", "RadioSuccess", "RadioUplink", "PlayWarning", "PlaySuccess", "PlayRadio"):
     assert token in presentation_source
 assert mission_source.count("presentation.PlayWarning();") == 4
 assert mission_source.count("presentation.PlaySuccess();") == 3
@@ -166,6 +182,9 @@ for shader in ("Universal Render Pipeline/Lit", "Universal Render Pipeline/Unlit
     assert shader in configurator_source
 
 view_source = (ROOT / "Assets/Scripts/ViewController.cs").read_text()
-assert "Application.isEditor ? ViewMode.Operator" in view_source
+assert "SetMode(ViewMode.Operator);" in view_source
+assert "hud.worldCamera = mode == ViewMode.Operator" in view_source
+assert "missionHud.gameObject.SetActive(mode == ViewMode.Operator)" in view_source
+assert "comfortFrame.SetActive(mode == ViewMode.Chase)" in view_source
 
 print(f"prototype smoke check: {len(story_codes)} stories, {min(estimated_durations) / 60:.1f}-{max(estimated_durations) / 60:.1f} min, ok")

@@ -12,6 +12,7 @@ public sealed class DronePresentation : MonoBehaviour
     private AudioSource radio;
     private AudioClip warningCue;
     private AudioClip successCue;
+    private AudioClip uplinkCue;
     private float rotorSpeed;
 
     private void Start()
@@ -35,16 +36,18 @@ public sealed class DronePresentation : MonoBehaviour
         radio.volume = 0.35f;
         warningCue = CreateCue("RadioWarning", 880f, 660f);
         successCue = CreateCue("RadioSuccess", 660f, 990f);
+        uplinkCue = CreateCue("RadioUplink", 1120f, 920f);
     }
 
     private void Update()
     {
         var armed = drone.MotorsArmed && !drone.Crashed;
-        var targetSpeed = armed ? 900f + body.linearVelocity.magnitude * 100f : 0f;
+        var load = drone.MotorLoad;
+        var targetSpeed = armed ? 650f + load * 520f + body.linearVelocity.magnitude * 30f : 0f;
         rotorSpeed = Mathf.MoveTowards(rotorSpeed, targetSpeed, 1800f * Time.deltaTime);
         foreach (var rotor in rotors) rotor.Rotate(0f, rotorSpeed * Time.deltaTime, 0f, Space.Self);
-        motor.pitch = 0.85f + Mathf.Clamp01(body.linearVelocity.magnitude / 8f) * 0.65f;
-        motor.volume = Mathf.MoveTowards(motor.volume, armed ? 0.18f : 0f, 0.4f * Time.deltaTime);
+        motor.pitch = 0.72f + load * 0.35f + Mathf.Clamp01(body.linearVelocity.magnitude / 8f) * 0.18f;
+        motor.volume = Mathf.MoveTowards(motor.volume, armed ? Mathf.Lerp(0.12f, 0.28f, Mathf.Clamp01(load / 1.8f)) : 0f, 0.4f * Time.deltaTime);
         var airspeed = body.linearVelocity.magnitude + drone.Wind.magnitude;
         wind.volume = Mathf.MoveTowards(wind.volume, Mathf.Clamp01(airspeed / 8f) * 0.22f, 0.25f * Time.deltaTime);
         wind.pitch = Mathf.Lerp(0.8f, 1.25f, Mathf.Clamp01(airspeed / 10f));
@@ -105,11 +108,14 @@ public sealed class DronePresentation : MonoBehaviour
 
     public void PlaySuccess() => radio.PlayOneShot(successCue);
 
+    public void PlayRadio() => radio.PlayOneShot(uplinkCue, 0.55f);
+
     private void OnDestroy()
     {
         Object.Destroy(motor.clip);
         Object.Destroy(wind.clip);
         Object.Destroy(warningCue);
         Object.Destroy(successCue);
+        Object.Destroy(uplinkCue);
     }
 }

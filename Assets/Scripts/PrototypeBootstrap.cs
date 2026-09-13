@@ -11,7 +11,9 @@ public sealed class PrototypeBootstrap : MonoBehaviour
     private readonly Dictionary<(Material, Color), Material> partMaterials = new();
     private readonly Dictionary<(Color, float), Material> surfaceMaterials = new();
     private readonly Dictionary<Color, Material> glowMaterials = new();
+    private readonly List<Mesh> generatedMeshes = new();
     private Transform staticScenery;
+    private Mesh firMesh;
 
     private void Awake()
     {
@@ -36,12 +38,14 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             OnTerrain(terrain, new Vector3(162f, 0f, 225f)) + Vector3.up * 0.05f,
             OnTerrain(terrain, new Vector3(-90f, 0f, 54f)) + Vector3.up * 0.05f
         };
-        var camera = CreateViewer(homePosition + new Vector3(0f, 1.55f, -6f));
+        var camera = CreateViewer(OnTerrain(terrain, homePosition + new Vector3(0f, 0f, -6f)) + Vector3.up * 1.55f);
 
         var sun = CreateLighting();
         staticScenery = new GameObject("StaticScenery").transform;
         CreateAlpineEnvironment(terrain, homePosition, groundSites);
-        var homePad = CreateLandingLight("HomeBase", homePosition, 2.2f, Cyan);
+        CreateDistantMountains();
+        CreateRescueTrail(terrain, homePosition, groundSites[1]);
+        var homePad = CreateLandingLight("HomeBase", homePosition, 2.2f, Cyan, 0f, TerrainNormal(terrain, homePosition));
         var sitePositions = (Vector3[])groundSites.Clone();
         sitePositions[0] += Vector3.up * 5f;
         sitePositions[2] += Vector3.up * 4f;
@@ -50,11 +54,11 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var siteColors = new[] { Cyan, Orange, Cyan, new Color(0.3f, 0.65f, 1f), new Color(1f, 0.7f, 0.15f), Color.green, Orange, new Color(0.7f, 0.4f, 1f) };
         var missionSites = new Transform[sitePositions.Length];
         for (var i = 0; i < missionSites.Length; i++)
-            missionSites[i] = CreateLandingLight(siteNames[i], sitePositions[i], 2.8f, siteColors[i]).transform;
+            missionSites[i] = CreateLandingLight(siteNames[i], sitePositions[i], 2.8f, siteColors[i], groundSites[i].y - sitePositions[i].y, TerrainNormal(terrain, groundSites[i])).transform;
         // Keep each renderer's culling bounds, including FPV views and off-screen shadow casters.
         // ponytail: static batching copies geometry; use instancing if scenery grows enough to pressure Quest memory.
         StaticBatchingUtility.Combine(staticScenery.gameObject);
-        CreateRescueTarget(groundSites[1] + new Vector3(2.4f, 0.9f, 1.5f));
+        var rescueTarget = CreateRescueTarget(groundSites[1] + new Vector3(2.4f, 0f, 1.5f));
         var thermalTargets = new Renderer[groundSites.Length];
         for (var i = 0; i < thermalTargets.Length; i++)
             thermalTargets[i] = CreateThermalTarget(groundSites[i] + Vector3.up * 0.7f);
@@ -70,8 +74,9 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         views.drone = drone;
         views.pose = camera.GetComponent<QuestPoseDriver>();
         views.monitor = monitor;
-        CreateHud(camera, out var status, out var telemetry, out var horizon);
+        CreateHud(camera, out var status, out var telemetry, out var radio, out var horizon, out var menuButtons, out var menuButtonTexts);
         views.hud = telemetry.canvas;
+        views.missionHud = status.canvas;
         views.Build(camera);
         var missions = gameObject.AddComponent<MissionController>();
         missions.drone = drone;
@@ -81,10 +86,19 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         missions.missionSites = missionSites;
         missions.package = package.transform;
         missions.fieldMarker = fieldMarker.transform;
+        missions.rescueTarget = rescueTarget.transform;
+        missions.recoveryWindows = new[]
+        {
+            GameObject.Find("CabinWindow").GetComponent<Renderer>(),
+            GameObject.Find("ShelterWindow").GetComponent<Renderer>()
+        };
         missions.statusText = status;
         missions.telemetryText = telemetry;
+        missions.radioText = radio;
+        missions.menuButtons = menuButtons;
+        missions.menuButtonTexts = menuButtonTexts;
         missions.artificialHorizon = horizon;
-        missions.blizzard = CreateBlizzard(camera.transform);
+        missions.blizzard = CreateBlizzard(monitor.Gimbal);
         missions.sun = sun;
     }
 
@@ -233,6 +247,12 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return position;
     }
 
+    private static Vector3 TerrainNormal(Terrain terrain, Vector3 position)
+    {
+        var local = position - terrain.transform.position;
+        return terrain.terrainData.GetInterpolatedNormal(local.x / terrain.terrainData.size.x, local.z / terrain.terrainData.size.z);
+    }
+
     private static Camera CreateViewer(Vector3 origin)
     {
         var viewer = new GameObject("QuestCamera");
@@ -281,13 +301,13 @@ public sealed class PrototypeBootstrap : MonoBehaviour
     private void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3[] sites)
     {
         var random = new System.Random(2187);
-        for (var i = 0; i < 34; i++)
+        for (var i = 0; i < 60; i++)
         {
             var position = new Vector3((float)random.NextDouble() * 450f - 225f, 0f, (float)random.NextDouble() * 390f - 75f);
             if (Vector2.Distance(new Vector2(position.x, position.z), new Vector2(home.x, home.z)) < 12f ||
                 Vector2.Distance(new Vector2(position.x, position.z), new Vector2(sites[1].x, sites[1].z)) < 12f) continue;
             position = OnTerrain(terrain, position);
-            if (position.y < 14f) CreateFir(position, 0.8f + (float)random.NextDouble() * 0.8f);
+            if (position.y < 18f) CreateFir(position, 0.8f + (float)random.NextDouble() * 0.8f);
         }
         for (var i = 0; i < 20; i++)
         {
@@ -353,23 +373,172 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         light.intensity = 5f;
     }
 
+    private void CreateDistantMountains()
+    {
+        const int columns = 33;
+        const int rows = 17;
+        var points = new Vector3[columns * rows];
+        for (var row = 0; row < rows; row++)
+        for (var column = 0; column < columns; column++)
+        {
+            var x = Mathf.Lerp(-480f, 480f, column / (columns - 1f));
+            var z = Mathf.Lerp(435f, 735f, row / (rows - 1f));
+            var north = row / (rows - 1f);
+            var rise = Mathf.SmoothStep(0f, 1f, north * 1.45f);
+            var broad = Mathf.PerlinNoise(x * 0.004f + 2.1f, z * 0.004f + 7.3f);
+            var ridge = Mathf.Pow(1f - Mathf.Abs(Mathf.PerlinNoise(x * 0.007f, z * 0.006f) * 2f - 1f), 2f);
+            var summits = Mathf.Max(AlpinePeak(x, z, -240f, 625f, 145f),
+                Mathf.Max(AlpinePeak(x, z, 15f, 650f, 120f), AlpinePeak(x, z, 245f, 610f, 150f)));
+            points[row * columns + column] = new Vector3(x, 35f + broad * 18f + rise * (north * 24f + ridge * 36f + summits * 92f), z);
+        }
+
+        var vertices = new Vector3[(columns - 1) * (rows - 1) * 6];
+        var uv = new Vector2[vertices.Length];
+        var faces = new[] { new List<int>(), new List<int>(), new List<int>() };
+        var vertex = 0;
+        for (var row = 0; row < rows - 1; row++)
+        for (var column = 0; column < columns - 1; column++)
+        {
+            var bottomLeft = points[row * columns + column];
+            var bottomRight = points[row * columns + column + 1];
+            var topLeft = points[(row + 1) * columns + column];
+            var topRight = points[(row + 1) * columns + column + 1];
+            var diagonal = (row + column & 1) == 0
+                ? new[] { bottomLeft, topLeft, bottomRight, bottomRight, topLeft, topRight }
+                : new[] { bottomLeft, topLeft, topRight, bottomLeft, topRight, bottomRight };
+            var first = vertex;
+            for (var i = 0; i < 6; i++)
+            {
+                vertices[vertex] = diagonal[i];
+                uv[vertex] = new Vector2((diagonal[i].x + 480f) / 960f, (diagonal[i].z - 435f) / 300f);
+                vertex++;
+            }
+            for (var triangle = 0; triangle < 2; triangle++)
+            {
+                var index = first + triangle * 3;
+                var normal = Vector3.Cross(vertices[index + 1] - vertices[index], vertices[index + 2] - vertices[index]).normalized;
+                var material = normal.y < 0.78f ? 2 : normal.x < -0.08f ? 1 : 0;
+                faces[material].AddRange(new[] { index, index + 1, index + 2 });
+            }
+        }
+        var mesh = new Mesh { name = "DistantMountainMesh", vertices = vertices, uv = uv, subMeshCount = 3 };
+        for (var face = 0; face < faces.Length; face++) mesh.SetTriangles(faces[face], face);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        generatedMeshes.Add(mesh);
+        var mountains = new GameObject("DistantMountain");
+        mountains.transform.SetParent(new GameObject("DistantScenery").transform, false);
+        mountains.AddComponent<MeshFilter>().sharedMesh = mesh;
+        mountains.AddComponent<MeshRenderer>().sharedMaterials = new[]
+        {
+            SurfaceMaterial(new Color(0.68f, 0.76f, 0.82f), 0.035f),
+            SurfaceMaterial(new Color(0.38f, 0.49f, 0.61f), 0.045f),
+            SurfaceMaterial(new Color(0.25f, 0.31f, 0.37f), 0.06f)
+        };
+    }
+
+    private void CreateRescueTrail(Terrain terrain, Vector3 home, Vector3 destination)
+    {
+        const int points = 96;
+        var vertices = new List<Vector3>(points * 4);
+        var triangles = new List<int>((points - 1) * 12);
+        var uv = new List<Vector2>(points * 4);
+        for (var track = -1; track <= 1; track += 2)
+        {
+            var start = vertices.Count;
+            for (var point = 0; point < points; point++)
+            {
+                var t = point / (points - 1f);
+                var center = Vector3.Lerp(home + new Vector3(2.5f, 0f, 4f), destination, t);
+                center.x -= Mathf.Sin(t * Mathf.PI) * 18f;
+                var tangent = Vector3.ProjectOnPlane(destination - home + new Vector3(-Mathf.Cos(t * Mathf.PI) * 18f * Mathf.PI, 0f, 0f), Vector3.up).normalized;
+                var side = new Vector3(-tangent.z, 0f, tangent.x);
+                center += side * track * 0.55f;
+                center.y = terrain.SampleHeight(center) + terrain.transform.position.y + 0.035f;
+                vertices.Add(center - side * 0.08f);
+                vertices.Add(center + side * 0.08f);
+                uv.Add(new Vector2(0f, t * 12f));
+                uv.Add(new Vector2(1f, t * 12f));
+            }
+            for (var point = 0; point < points - 1; point++)
+            {
+                var index = start + point * 2;
+                triangles.AddRange(new[] { index, index + 1, index + 2, index + 1, index + 3, index + 2 });
+            }
+        }
+        var mesh = new Mesh { name = "RescueTrailMesh" };
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.SetUVs(0, uv);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        generatedMeshes.Add(mesh);
+        var trail = new GameObject("RescueTrail");
+        trail.transform.SetParent(transform, false);
+        trail.AddComponent<MeshFilter>().sharedMesh = mesh;
+        trail.AddComponent<MeshRenderer>().sharedMaterial = SurfaceMaterial(new Color(0.58f, 0.64f, 0.68f), 0.025f);
+    }
+
     private static Quaternion RandomRotation(System.Random random) => Quaternion.Euler((float)random.NextDouble() * 25f, (float)random.NextDouble() * 360f, (float)random.NextDouble() * 25f);
 
     private void CreateFir(Vector3 position, float scale)
     {
-        var root = new GameObject("SnowFir");
-        root.transform.SetParent(staticScenery, false);
-        root.transform.position = position;
-        root.transform.localScale = Vector3.one * scale;
-        var trunk = CreatePart(PrimitiveType.Cylinder, root.transform, new Vector3(0f, 1.4f, 0f), new Vector3(0.22f, 1.4f, 0.22f), new Color(0.2f, 0.12f, 0.07f));
-        for (var i = 0; i < 3; i++)
+        firMesh ??= CreateFirMesh();
+        var tree = new GameObject("SnowFir");
+        tree.transform.SetParent(staticScenery, false);
+        tree.transform.position = position;
+        tree.transform.localScale = Vector3.one * scale;
+        tree.AddComponent<MeshFilter>().sharedMesh = firMesh;
+        tree.AddComponent<MeshRenderer>().sharedMaterials = new[]
         {
-            var crown = CreatePart(PrimitiveType.Sphere, root.transform, new Vector3(0f, 2.2f + i * 0.85f, 0f), new Vector3(1.65f - i * 0.35f, 0.65f, 1.65f - i * 0.35f), new Color(0.08f, 0.19f, 0.15f));
-            var snow = CreatePart(PrimitiveType.Sphere, root.transform, new Vector3(-0.15f, 2.45f + i * 0.85f, 0f), new Vector3(1.45f - i * 0.32f, 0.22f, 1.45f - i * 0.32f), new Color(0.83f, 0.87f, 0.9f));
-            Object.Destroy(crown.GetComponent<Collider>());
-            Object.Destroy(snow.GetComponent<Collider>());
+            SurfaceMaterial(new Color(0.2f, 0.12f, 0.07f), 0.04f),
+            SurfaceMaterial(new Color(0.055f, 0.16f, 0.12f), 0.045f),
+            SurfaceMaterial(new Color(0.82f, 0.87f, 0.9f), 0.025f)
+        };
+        var collider = tree.AddComponent<CapsuleCollider>();
+        collider.center = new Vector3(0f, 2.1f, 0f);
+        collider.radius = 0.75f;
+        collider.height = 4.2f;
+    }
+
+    private Mesh CreateFirMesh()
+    {
+        var vertices = new List<Vector3>();
+        var trunk = new List<int>();
+        var needles = new List<int>();
+        var snow = new List<int>();
+        AddFirLayer(vertices, trunk, 0f, 2.5f, 0.14f, 0.09f, 6);
+        AddFirLayer(vertices, needles, 1.05f, 2.1f, 1.35f, 0f, 7);
+        AddFirLayer(vertices, needles, 1.9f, 1.9f, 1.08f, 0f, 7);
+        AddFirLayer(vertices, needles, 2.7f, 1.65f, 0.78f, 0f, 7);
+        AddFirLayer(vertices, snow, 2.38f, 0.82f, 0.5f, 0f, 7);
+        AddFirLayer(vertices, snow, 3.08f, 0.77f, 0.42f, 0f, 7);
+        AddFirLayer(vertices, snow, 3.68f, 0.72f, 0.32f, 0f, 7);
+        var mesh = new Mesh { name = "SnowFirMesh", subMeshCount = 3 };
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(trunk, 0);
+        mesh.SetTriangles(needles, 1);
+        mesh.SetTriangles(snow, 2);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        generatedMeshes.Add(mesh);
+        return mesh;
+    }
+
+    private static void AddFirLayer(List<Vector3> vertices, List<int> triangles, float y, float height, float bottomRadius, float topRadius, int sides)
+    {
+        for (var side = 0; side < sides; side++)
+        {
+            var angle = side * Mathf.PI * 2f / sides;
+            var nextAngle = (side + 1) * Mathf.PI * 2f / sides;
+            var bottomLeft = new Vector3(Mathf.Sin(angle) * bottomRadius, y, Mathf.Cos(angle) * bottomRadius);
+            var bottomRight = new Vector3(Mathf.Sin(nextAngle) * bottomRadius, y, Mathf.Cos(nextAngle) * bottomRadius);
+            var topLeft = new Vector3(Mathf.Sin(angle) * topRadius, y + height, Mathf.Cos(angle) * topRadius);
+            var topRight = new Vector3(Mathf.Sin(nextAngle) * topRadius, y + height, Mathf.Cos(nextAngle) * topRadius);
+            var first = vertices.Count;
+            vertices.AddRange(new[] { bottomLeft, topLeft, bottomRight, bottomRight, topLeft, topRight });
+            for (var vertex = 0; vertex < 6; vertex++) triangles.Add(first + vertex);
         }
-        Object.Destroy(trunk.GetComponent<Collider>());
     }
 
     private GameObject CreateBox(string name, Vector3 position, Vector3 scale, Color color, Quaternion rotation = default, bool glowing = false)
@@ -405,33 +574,49 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return material;
     }
 
-    private GameObject CreateLandingLight(string name, Vector3 position, float diameter, Color color)
+    private GameObject CreateLandingLight(string name, Vector3 position, float diameter, Color color, float surfaceOffset = 0f, Vector3 surfaceNormal = default)
     {
         var zone = new GameObject(name);
         zone.transform.SetParent(staticScenery, false);
         zone.transform.position = position;
-        var material = GlowMaterial(color);
-        for (var i = 0; i < 16; i++)
+        var surface = new GameObject("LandingSurface").transform;
+        surface.SetParent(zone.transform, false);
+        surface.localPosition = Vector3.up * surfaceOffset;
+        surface.localRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal.sqrMagnitude > 0.5f ? surfaceNormal : Vector3.up);
+        var padColor = new Color(0.12f, 0.15f, 0.16f);
+        var pad = CreatePart(PrimitiveType.Cylinder, surface, Vector3.up * 0.02f, new Vector3(diameter * 0.9f, 0.035f, diameter * 0.9f), padColor);
+        pad.name = "LandingPad";
+        Object.Destroy(pad.GetComponent<Collider>());
+        var marking = new Color(0.74f, 0.78f, 0.8f);
+        var marker = CreatePart(PrimitiveType.Cylinder, surface, Vector3.up * 0.06f, new Vector3(diameter * 0.78f, 0.008f, diameter * 0.78f), marking);
+        marker.name = "LandingMark";
+        Object.Destroy(marker.GetComponent<Collider>());
+        var center = CreatePart(PrimitiveType.Cylinder, surface, Vector3.up * 0.071f, new Vector3(diameter * 0.6f, 0.009f, diameter * 0.6f), padColor);
+        center.name = "LandingPadCenter";
+        Object.Destroy(center.GetComponent<Collider>());
+        if (name == "HomeBase")
         {
-            var angle = i / 16f * Mathf.PI * 2f;
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            marker.name = "LandingGlow";
-            marker.transform.SetParent(zone.transform, false);
-            marker.transform.localPosition = new Vector3(Mathf.Cos(angle) * diameter * 0.5f, 0.09f, Mathf.Sin(angle) * diameter * 0.5f);
-            marker.transform.localScale = Vector3.one * 0.14f;
-            marker.GetComponent<Renderer>().sharedMaterial = material;
-            Object.Destroy(marker.GetComponent<Collider>());
+            foreach (var mark in new[]
+                     {
+                         CreatePart(PrimitiveType.Cube, surface, new Vector3(-0.18f, 0.075f, 0f), new Vector3(0.09f, 0.025f, 0.65f), marking),
+                         CreatePart(PrimitiveType.Cube, surface, new Vector3(0.18f, 0.075f, 0f), new Vector3(0.09f, 0.025f, 0.65f), marking),
+                         CreatePart(PrimitiveType.Cube, surface, new Vector3(0f, 0.075f, 0f), new Vector3(0.42f, 0.025f, 0.09f), marking)
+                     })
+            {
+                mark.name = "HomeMark";
+                Object.Destroy(mark.GetComponent<Collider>());
+            }
         }
         var lightObject = new GameObject("LandingLight");
         lightObject.transform.SetParent(zone.transform, false);
-        lightObject.transform.localPosition = Vector3.up * 5f;
+        lightObject.transform.localPosition = Vector3.up * (surfaceOffset + 3f);
         lightObject.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
         var light = lightObject.AddComponent<Light>();
         light.type = LightType.Spot;
         light.color = color;
-        light.intensity = 18f;
-        light.range = 10f;
-        light.spotAngle = 36f;
+        light.intensity = 0f;
+        light.range = 14f;
+        light.spotAngle = 44f;
         light.shadows = LightShadows.None;
         return zone;
     }
@@ -473,8 +658,8 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var navigationLight = new GameObject("NavigationLight").AddComponent<Light>();
         navigationLight.transform.SetParent(droneObject.transform, false);
         navigationLight.type = LightType.Point;
-        navigationLight.range = 2.5f;
-        navigationLight.intensity = 1.2f;
+        navigationLight.range = 0.8f;
+        navigationLight.intensity = 0.15f;
         navigationLight.color = Color.red;
 
         var presentation = droneObject.AddComponent<DronePresentation>();
@@ -506,7 +691,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var key = (renderer.sharedMaterial, color);
         if (!partMaterials.TryGetValue(key, out var material))
         {
-            material = new Material(renderer.sharedMaterial) { color = color };
+            material = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard")) { color = color };
             partMaterials.Add(key, material);
         }
         renderer.sharedMaterial = material;
@@ -548,14 +733,20 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 
     private GameObject CreateRescueTarget(Vector3 position)
     {
-        var person = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        var signal = new GameObject("RescueSignal");
+        signal.transform.SetParent(transform, false);
+        signal.transform.position = position;
+        var person = CreatePart(PrimitiveType.Capsule, signal.transform, new Vector3(0f, 0.62f, 0f), new Vector3(0.42f, 0.58f, 0.42f), Orange, Quaternion.Euler(0f, 0f, 12f));
         person.name = "RescueLeader";
-        person.transform.position = position;
-        person.transform.localScale = new Vector3(0.42f, 0.72f, 0.42f);
-        person.GetComponent<Renderer>().material.color = Orange;
-        var vest = CreatePart(PrimitiveType.Cube, person.transform, new Vector3(0f, 0.25f, 0.4f), new Vector3(0.8f, 0.45f, 0.08f), new Color(1f, 0.9f, 0.12f));
-        Object.Destroy(vest.GetComponent<Collider>());
-        return person;
+        var hood = CreatePart(PrimitiveType.Sphere, signal.transform, new Vector3(-0.13f, 1.28f, 0f), Vector3.one * 0.46f, new Color(0.17f, 0.22f, 0.25f));
+        hood.name = "RescueHood";
+        var vest = CreatePart(PrimitiveType.Cube, signal.transform, new Vector3(0.08f, 0.7f, 0.39f), new Vector3(0.62f, 0.34f, 0.07f), new Color(1f, 0.82f, 0.12f), Quaternion.Euler(0f, 0f, 12f));
+        vest.name = "RescueVest";
+        var blanket = CreatePart(PrimitiveType.Cube, signal.transform, new Vector3(0.75f, 0.08f, 0.25f), new Vector3(1.4f, 0.06f, 1f), new Color(0.82f, 0.16f, 0.05f), Quaternion.Euler(0f, -18f, 0f));
+        blanket.name = "EmergencyBlanket";
+        foreach (var collider in signal.GetComponentsInChildren<Collider>()) Object.Destroy(collider);
+        signal.SetActive(false);
+        return signal;
     }
 
     private Renderer CreateThermalTarget(Vector3 position)
@@ -564,6 +755,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         target.name = "ThermalTrace";
         Object.Destroy(target.GetComponent<Collider>());
         var renderer = target.GetComponent<Renderer>();
+        renderer.sharedMaterial = GlowMaterial(Orange);
         renderer.enabled = false;
         return renderer;
     }
@@ -602,43 +794,94 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return storm;
     }
 
-    private static void CreateHud(Camera camera, out Text status, out Text telemetry, out RectTransform horizon)
+    private static void CreateHud(Camera camera, out Text status, out Text telemetry, out Text radio, out RectTransform horizon, out Image[] menuButtons, out Text[] menuButtonTexts)
     {
         var canvas = UiCanvas("FpvHud", camera);
         var missionCanvas = UiCanvas("MissionHud", camera);
+        var thermalOverlay = UiImage(canvas.transform, "ThermalOverlay", Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, new Color(0.05f, 0.18f, 0.28f, 0.16f), new Vector2(0.5f, 0.5f));
+        thermalOverlay.enabled = false;
 
-        var statusPanel = UiImage(missionCanvas.transform, "OperationsMenu", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(38f, -38f), new Vector2(800f, 420f), new Color(0.015f, 0.025f, 0.04f, 0.8f), new Vector2(0f, 1f));
-        status = UiText(statusPanel.transform, "StoryStatus", 27, Color.white, TextAnchor.UpperLeft);
-        status.rectTransform.offsetMin = new Vector2(26f, 22f);
-        status.rectTransform.offsetMax = new Vector2(-26f, -22f);
-        var accent = UiImage(statusPanel.transform, "Accent", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(7f, 0f), Cyan, new Vector2(0f, 0.5f));
-        accent.rectTransform.sizeDelta = new Vector2(7f, 0f);
+        var statusPanel = UiImage(missionCanvas.transform, "OperationsMenu", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(38f, -38f), new Vector2(790f, 340f), new Color(0.012f, 0.018f, 0.024f, 0.86f), new Vector2(0f, 1f));
+        UiImage(statusPanel.transform, "BriefingHeader", new Vector2(0f, 1f), new Vector2(1f, 1f), Vector2.zero, new Vector2(0f, 6f), Orange, new Vector2(0.5f, 1f));
+        var accent = UiImage(statusPanel.transform, "BriefingRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(5f, 0f), Cyan, new Vector2(0f, 0.5f));
+        accent.rectTransform.sizeDelta = new Vector2(5f, 0f);
+        var uplink = UiText(statusPanel.transform, "BriefingUplink", 16, new Color(0.48f, 0.58f, 0.64f), TextAnchor.UpperRight);
+        uplink.text = "SAR COMMAND  //  ENCRYPTED UPLINK";
+        uplink.rectTransform.offsetMin = new Vector2(380f, 0f);
+        uplink.rectTransform.offsetMax = new Vector2(-22f, -18f);
+        var index = UiText(statusPanel.transform, "BriefingIndex", 96, new Color(0.55f, 0.67f, 0.72f, 0.07f), TextAnchor.UpperRight);
+        index.text = "01";
+        index.rectTransform.offsetMin = new Vector2(520f, 40f);
+        index.rectTransform.offsetMax = new Vector2(-24f, -58f);
+        UiImage(statusPanel.transform, "BriefingFooter", new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 2f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.3f), new Vector2(0.5f, 0f));
+        status = UiText(statusPanel.transform, "StoryStatus", 24, Color.white, TextAnchor.UpperLeft);
+        status.rectTransform.offsetMin = new Vector2(28f, 22f);
+        status.rectTransform.offsetMax = new Vector2(-28f, -42f);
+        menuButtons = new Image[4];
+        menuButtonTexts = new Text[4];
+        for (var i = 0; i < menuButtons.Length; i++)
+        {
+            var button = UiImage(statusPanel.transform, $"MenuButton{i + 1}", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-22f, -52f - i * 66f), new Vector2(278f, 52f), new Color(0.08f, 0.13f, 0.17f, 0.94f), new Vector2(1f, 1f));
+            UiImage(button.transform, "ButtonRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 0f), Cyan, new Vector2(0f, 0.5f));
+            var label = UiText(button.transform, $"MenuButtonLabel{i + 1}", 18, Color.white, TextAnchor.MiddleLeft);
+            label.rectTransform.offsetMin = new Vector2(18f, 0f);
+            label.rectTransform.offsetMax = new Vector2(-12f, 0f);
+            menuButtons[i] = button;
+            menuButtonTexts[i] = label;
+        }
 
-        var alertPanel = UiImage(canvas.transform, "AlertBar", Vector2.one, Vector2.one, new Vector2(-38f, -38f), new Vector2(520f, 58f), new Color(0.14f, 0.025f, 0.015f, 0.9f), Vector2.one);
+        var alertPanel = UiImage(canvas.transform, "AlertBar", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -86f), new Vector2(560f, 52f), new Color(0.14f, 0.025f, 0.015f, 0.88f), new Vector2(0.5f, 1f));
         telemetry = UiText(alertPanel.transform, "Telemetry", 28, Orange, TextAnchor.MiddleCenter);
         telemetry.rectTransform.offsetMin = new Vector2(12f, 5f);
         telemetry.rectTransform.offsetMax = new Vector2(-12f, -5f);
 
-        Gauge(canvas.transform, "Speed", -440f, Cyan);
-        Gauge(canvas.transform, "Altitude", -230f, Cyan);
-        Gauge(canvas.transform, "Battery", -20f, Cyan);
-        DirectionIndicator(canvas.transform, "Wind", 205f, Cyan);
-        DirectionIndicator(canvas.transform, "Navigation", 430f, Orange);
+        var radioPanel = UiImage(canvas.transform, "RadioCaption", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 146f), new Vector2(900f, 88f), new Color(0.005f, 0.008f, 0.012f, 0.52f), new Vector2(0.5f, 0f));
+        UiImage(radioPanel.transform, "RadioRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 0f), Orange, new Vector2(0f, 0.5f));
+        radio = UiText(radioPanel.transform, "RadioSubtitle", 28, Color.white, TextAnchor.MiddleLeft);
+        radio.rectTransform.offsetMin = new Vector2(18f, 8f);
+        radio.rectTransform.offsetMax = new Vector2(-18f, -8f);
+        TextShadow(radio);
+        radioPanel.gameObject.SetActive(false);
+
+        Gauge(canvas.transform, "Speed", "H.S", Vector2.zero, new Vector2(48f, 36f), Vector2.zero, Color.white);
+        Gauge(canvas.transform, "Altitude", "ALT", new Vector2(1f, 0f), new Vector2(-48f, 36f), new Vector2(1f, 0f), Color.white);
+        Gauge(canvas.transform, "Battery", "BAT", Vector2.one, new Vector2(-48f, -36f), Vector2.one, Color.white);
+        DirectionIndicator(canvas.transform, "Wind", "WIND", new Vector2(0f, 1f), new Vector2(48f, -36f), new Vector2(0f, 1f), Color.white);
+        DirectionIndicator(canvas.transform, "Navigation", "DST", new Vector2(0.5f, 0f), new Vector2(0f, 36f), new Vector2(0.5f, 0f), Orange);
+
+        var heading = UiText(canvas.transform, "HeadingValue", 28, Color.white, TextAnchor.UpperCenter);
+        heading.text = "000°";
+        heading.rectTransform.anchorMin = heading.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+        heading.rectTransform.pivot = new Vector2(0.5f, 1f);
+        heading.rectTransform.anchoredPosition = new Vector2(0f, -28f);
+        heading.rectTransform.sizeDelta = new Vector2(140f, 36f);
+        TextShadow(heading);
+        UiImage(canvas.transform, "HeadingTick", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -66f), new Vector2(2f, 10f), new Color(1f, 1f, 1f, 0.8f), new Vector2(0.5f, 1f));
 
         var horizonObject = new GameObject("ArtificialHorizon");
         horizonObject.transform.SetParent(canvas.transform, false);
         horizon = horizonObject.AddComponent<RectTransform>();
         horizon.anchorMin = horizon.anchorMax = new Vector2(0.5f, 0.5f);
         horizon.sizeDelta = new Vector2(440f, 220f);
-        Line(horizon, new Vector2(-125f, 0f), new Vector2(95f, 3f), Cyan);
-        Line(horizon, new Vector2(125f, 0f), new Vector2(95f, 3f), Cyan);
-        Line(horizon, new Vector2(0f, 0f), new Vector2(35f, 3f), Orange);
-        Line(canvas.transform, new Vector2(0f, 0f), new Vector2(4f, 42f), Orange);
-        Line(canvas.transform, new Vector2(0f, 0f), new Vector2(42f, 4f), Orange);
-        Line(canvas.transform, new Vector2(-290f, 0f), new Vector2(70f, 3f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.55f));
-        Line(canvas.transform, new Vector2(290f, 0f), new Vector2(70f, 3f), new Color(Cyan.r, Cyan.g, Cyan.b, 0.55f));
+        Line(horizon, new Vector2(-125f, 0f), new Vector2(95f, 2f), new Color(1f, 1f, 1f, 0.82f));
+        Line(horizon, new Vector2(125f, 0f), new Vector2(95f, 2f), new Color(1f, 1f, 1f, 0.82f));
+        var direction = UiText(canvas.transform, "FlightDirection", 56, Color.white, TextAnchor.MiddleCenter);
+        direction.text = "○";
+        direction.rectTransform.anchorMin = direction.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        direction.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        direction.rectTransform.sizeDelta = new Vector2(72f, 72f);
+        TextShadow(direction);
+        Line(canvas.transform, Vector2.zero, new Vector2(5f, 5f), Orange);
+
+        var action = UiImage(canvas.transform, "ActionIndicator", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -92f), new Vector2(220f, 38f), Color.clear, new Vector2(0.5f, 0.5f));
+        var actionLabel = UiText(action.transform, "ActionLabel", 16, new Color(0.86f, 0.89f, 0.91f), TextAnchor.UpperCenter);
+        actionLabel.rectTransform.offsetMin = new Vector2(0f, 13f);
+        actionLabel.rectTransform.offsetMax = Vector2.zero;
+        TextShadow(actionLabel);
+        var actionTrack = UiImage(action.transform, "ActionTrack", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 4f), new Vector2(200f, 2f), new Color(1f, 1f, 1f, 0.24f), new Vector2(0.5f, 0f));
+        UiImage(actionTrack.transform, "ActionFill", new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(200f, 2f), Orange, new Vector2(0f, 0.5f));
         foreach (var root in new[] { canvas.transform, missionCanvas.transform })
-        foreach (var child in root.GetComponentsInChildren<Transform>()) child.gameObject.layer = LayerMask.NameToLayer("UI");
+        foreach (var child in root.GetComponentsInChildren<Transform>(true)) child.gameObject.layer = LayerMask.NameToLayer("UI");
     }
 
     private static Canvas UiCanvas(string name, Camera camera)
@@ -687,28 +930,48 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         return text;
     }
 
-    private static void Gauge(Transform parent, string name, float x, Color color)
+    private static void Gauge(Transform parent, string name, string labelText, Vector2 anchor, Vector2 position, Vector2 pivot, Color color)
     {
-        var panel = UiImage(parent, name + "Gauge", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(x, 24f), new Vector2(190f, 88f), new Color(0.01f, 0.02f, 0.03f, 0.82f), new Vector2(0.5f, 0f));
-        var value = UiText(panel.transform, name + "Value", 22, Color.white, TextAnchor.MiddleCenter);
-        value.rectTransform.offsetMin = new Vector2(8f, 15f);
-        value.rectTransform.offsetMax = new Vector2(-8f, -4f);
-        var track = UiImage(panel.transform, name + "Track", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 10f), new Vector2(154f, 7f), new Color(color.r, color.g, color.b, 0.18f), new Vector2(0.5f, 0f));
-        UiImage(track.transform, name + "Fill", new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(154f, 7f), color, new Vector2(0f, 0.5f));
+        var panel = UiImage(parent, name + "Gauge", anchor, anchor, position, new Vector2(230f, 82f), Color.clear, pivot);
+        var label = UiText(panel.transform, name + "Label", 18, new Color(0.82f, 0.85f, 0.87f), TextAnchor.UpperLeft);
+        label.text = labelText;
+        label.rectTransform.offsetMin = new Vector2(0f, 54f);
+        label.rectTransform.offsetMax = new Vector2(0f, -6f);
+        var value = UiText(panel.transform, name + "Value", 40, Color.white, TextAnchor.LowerLeft);
+        value.rectTransform.offsetMin = new Vector2(0f, 12f);
+        value.rectTransform.offsetMax = new Vector2(0f, -25f);
+        TextShadow(label);
+        TextShadow(value);
+        var track = UiImage(panel.transform, name + "Track", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 7f), new Vector2(190f, 2f), new Color(1f, 1f, 1f, 0.24f), new Vector2(0f, 0f));
+        UiImage(track.transform, name + "Fill", new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(190f, 2f), color, new Vector2(0f, 0.5f));
     }
 
-    private static void DirectionIndicator(Transform parent, string name, float x, Color color)
+    private static void DirectionIndicator(Transform parent, string name, string labelText, Vector2 anchor, Vector2 position, Vector2 pivot, Color color)
     {
-        var panel = UiImage(parent, name + "Gauge", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(x, 24f), new Vector2(205f, 88f), new Color(0.01f, 0.02f, 0.03f, 0.82f), new Vector2(0.5f, 0f));
-        var needle = UiText(panel.transform, name + "Needle", 34, color, TextAnchor.MiddleCenter);
+        var panel = UiImage(parent, name + "Gauge", anchor, anchor, position, new Vector2(230f, 82f), Color.clear, pivot);
+        var label = UiText(panel.transform, name + "Label", 18, new Color(0.82f, 0.85f, 0.87f), TextAnchor.UpperLeft);
+        label.text = labelText;
+        label.rectTransform.offsetMin = new Vector2(0f, 54f);
+        label.rectTransform.offsetMax = new Vector2(0f, -6f);
+        var value = UiText(panel.transform, name + "Value", 40, Color.white, TextAnchor.LowerLeft);
+        value.rectTransform.offsetMin = new Vector2(0f, 12f);
+        value.rectTransform.offsetMax = new Vector2(-48f, -25f);
+        TextShadow(label);
+        TextShadow(value);
+        UiImage(panel.transform, name + "Track", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 7f), new Vector2(190f, 2f), new Color(color.r, color.g, color.b, 0.35f), new Vector2(0f, 0f));
+        var needle = UiText(panel.transform, name + "Needle", 28, color, TextAnchor.MiddleCenter);
         needle.text = "▲";
         needle.rectTransform.anchorMin = needle.rectTransform.anchorMax = new Vector2(0f, 0.5f);
         needle.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        needle.rectTransform.anchoredPosition = new Vector2(42f, 0f);
-        needle.rectTransform.sizeDelta = new Vector2(44f, 44f);
-        var value = UiText(panel.transform, name + "Value", 20, Color.white, TextAnchor.MiddleCenter);
-        value.rectTransform.offsetMin = new Vector2(76f, 6f);
-        value.rectTransform.offsetMax = new Vector2(-8f, -6f);
+        needle.rectTransform.anchoredPosition = new Vector2(205f, -2f);
+        needle.rectTransform.sizeDelta = new Vector2(32f, 32f);
+    }
+
+    private static void TextShadow(Text text)
+    {
+        var shadow = text.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        shadow.effectDistance = new Vector2(1.5f, -1.5f);
     }
 
     private static void Line(Transform parent, Vector2 position, Vector2 size, Color color)
@@ -718,6 +981,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
 
     private void OnDestroy()
     {
+        foreach (var mesh in generatedMeshes) Object.Destroy(mesh);
         foreach (var material in partMaterials.Values) Object.Destroy(material);
         foreach (var material in glowMaterials.Values) Object.Destroy(material);
         foreach (var material in surfaceMaterials.Values)

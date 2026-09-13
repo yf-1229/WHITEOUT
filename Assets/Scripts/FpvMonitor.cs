@@ -6,8 +6,8 @@ public sealed class FpvMonitor : MonoBehaviour
     public Renderer[] thermalTargets;
     public int textureSize = 512;
     public float renderInterval = 1f / 30f;
-    public float gimbalPositionResponse = 10f;
-    public float gimbalRotationResponse = 6f;
+    public Vector3 cameraOffset = new(0f, -0.16f, 0.48f);
+    public float cameraTiltDegrees = 8f;
 
     private Camera fpvCamera;
     private RenderTexture feed;
@@ -38,24 +38,24 @@ public sealed class FpvMonitor : MonoBehaviour
         feed.useMipMap = false;
         feed.Create();
         fpvCamera.targetTexture = feed;
-        UpdateGimbal(true);
+        UpdateGimbal();
 
         panel = GameObject.CreatePrimitive(PrimitiveType.Quad);
         panel.name = "FPVMonitor";
         panel.layer = LayerMask.NameToLayer("UI");
         panel.transform.SetParent(viewer.transform, false);
-        panel.transform.localPosition = new Vector3(0.38f, -0.2f, 0.95f);
+        panel.transform.localPosition = new Vector3(0.3f, -0.18f, 0.9f);
         panel.transform.localRotation = Quaternion.identity;
-        panel.transform.localScale = new Vector3(0.52f, 0.52f * 9f / 16f, 0.52f);
+        panel.transform.localScale = new Vector3(0.68f, 0.68f * 9f / 16f, 0.68f);
         Object.Destroy(panel.GetComponent<Collider>());
-        var material = new Material(Shader.Find("Unlit/Texture") ?? Shader.Find("Universal Render Pipeline/Unlit"));
+        var material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Texture"));
         material.mainTexture = feed;
         panel.GetComponent<Renderer>().sharedMaterial = material;
     }
 
     private void Update()
     {
-        UpdateGimbal(false);
+        UpdateGimbal();
         if (!Application.isBatchMode && fpvCamera != null && panel.activeSelf && Time.unscaledTime >= nextRender)
         {
             nextRender = Time.unscaledTime + renderInterval;
@@ -69,18 +69,11 @@ public sealed class FpvMonitor : MonoBehaviour
         UpdateThermalTarget();
     }
 
-    private void UpdateGimbal(bool snap)
+    private void UpdateGimbal()
     {
-        var forward = Vector3.ProjectOnPlane(drone.transform.forward, Vector3.up);
-        if (forward.sqrMagnitude < 0.01f) forward = Vector3.ProjectOnPlane(fpvCamera.transform.forward, Vector3.up);
-        forward.Normalize();
-        var targetPosition = drone.transform.position + forward * 0.9f + Vector3.up * 0.16f;
-        var targetRotation = Quaternion.LookRotation(forward, Vector3.up) * Quaternion.Euler(8f, 0f, 0f);
-        snap |= Vector3.SqrMagnitude(fpvCamera.transform.position - targetPosition) > 25f;
-        fpvCamera.transform.position = Vector3.Lerp(fpvCamera.transform.position, targetPosition,
-            snap ? 1f : 1f - Mathf.Exp(-gimbalPositionResponse * Time.unscaledDeltaTime));
-        fpvCamera.transform.rotation = Quaternion.Slerp(fpvCamera.transform.rotation, targetRotation,
-            snap ? 1f : 1f - Mathf.Exp(-gimbalRotationResponse * Time.unscaledDeltaTime));
+        var targetPosition = drone.transform.TransformPoint(cameraOffset);
+        var targetRotation = drone.transform.rotation * Quaternion.Euler(cameraTiltDegrees, 0f, 0f);
+        fpvCamera.transform.SetPositionAndRotation(targetPosition, targetRotation);
     }
 
     public void SetPanelVisible(bool visible)

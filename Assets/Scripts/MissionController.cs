@@ -11,8 +11,13 @@ public sealed class MissionController : MonoBehaviour
     public Transform[] missionSites;
     public Transform package;
     public Transform fieldMarker;
+    public Transform rescueTarget;
+    public Renderer[] recoveryWindows;
     public Text statusText;
     public Text telemetryText;
+    public Text radioText;
+    public Image[] menuButtons;
+    public Text[] menuButtonTexts;
     public RectTransform artificialHorizon;
     public ParticleSystem blizzard;
     public Light sun;
@@ -31,7 +36,6 @@ public sealed class MissionController : MonoBehaviour
     private DronePresentation presentation;
     private Light homeLight;
     private Light[] siteLights;
-    private bool[] restoredSites;
     private float freeFlightSpeed;
     private float missionStart;
     private float actionProgress;
@@ -45,6 +49,8 @@ public sealed class MissionController : MonoBehaviour
     private int completedDistressCalls;
     private int networkReadiness;
     private int unlockedStory;
+    private readonly bool[] siteRestored = new bool[8];
+    private Color[] recoveryWindowColors;
     private bool distressOffered;
     private bool distressAccepted;
     private bool distressCompleted;
@@ -54,18 +60,28 @@ public sealed class MissionController : MonoBehaviour
     private string previousWindZone = "CALM";
     private float turbulencePulseAfter;
     private float terrainWarningAfter;
+    private float radioUntil;
     private bool terrainAlert;
     private MissionResult lastResult;
     private Image speedFill;
     private Image altitudeFill;
     private Image batteryFill;
+    private Image actionFill;
+    private Image thermalOverlay;
     private Text speedValue;
     private Text altitudeValue;
     private Text batteryValue;
     private Text windValue;
     private Text navigationValue;
+    private Text headingValue;
+    private Text actionLabel;
+    private Text briefingIndex;
     private RectTransform windNeedle;
     private RectTransform navigationNeedle;
+    private MenuPage menuPage;
+    private int menuSelection;
+
+    private enum MenuPage { Main, Missions, Practice, Settings }
 
     private int MissionModifier => SelectedStory % 4;
     private bool HasDistressCall => SelectedStory % 3 == 0;
@@ -80,7 +96,7 @@ public sealed class MissionController : MonoBehaviour
 
     private void Start()
     {
-        selectedMode = (FlightMode)Mathf.Clamp(PlayerPrefs.GetInt("flightMode", 0), 0, 1);
+        selectedMode = FlightMode.Assist;
         unlockedStory = FindUnlockedStory();
         SelectedStory = Mathf.Clamp(PlayerPrefs.GetInt("storyIndex", 0), 0, unlockedStory);
         body = drone.GetComponent<Rigidbody>();
@@ -90,22 +106,30 @@ public sealed class MissionController : MonoBehaviour
         speedFill = Hud<Image>("SpeedFill");
         altitudeFill = Hud<Image>("AltitudeFill");
         batteryFill = Hud<Image>("BatteryFill");
+        actionFill = Hud<Image>("ActionFill");
+        thermalOverlay = Hud<Image>("ThermalOverlay");
         speedValue = Hud<Text>("SpeedValue");
         altitudeValue = Hud<Text>("AltitudeValue");
         batteryValue = Hud<Text>("BatteryValue");
         windValue = Hud<Text>("WindValue");
         navigationValue = Hud<Text>("NavigationValue");
+        headingValue = Hud<Text>("HeadingValue");
+        actionLabel = Hud<Text>("ActionLabel");
+        briefingIndex = Hud<Text>("BriefingIndex");
         windNeedle = Hud<RectTransform>("WindNeedle");
         navigationNeedle = Hud<RectTransform>("NavigationNeedle");
         homeLight = homePad.GetComponentInChildren<Light>();
         siteLights = new Light[missionSites.Length];
-        restoredSites = new bool[missionSites.Length];
         for (var i = 0; i < missionSites.Length; i++) siteLights[i] = missionSites[i].GetComponentInChildren<Light>();
+        recoveryWindowColors = new Color[recoveryWindows.Length];
+        for (var i = 0; i < recoveryWindows.Length; i++)
+            recoveryWindowColors[i] = recoveryWindows[i].sharedMaterial.HasProperty("_BaseColor") ? recoveryWindows[i].sharedMaterial.GetColor("_BaseColor") : recoveryWindows[i].sharedMaterial.color;
         freeFlightSpeed = drone.maxHorizontalSpeed;
         drone.SetFlightMode(selectedMode);
-        drone.BeginMission(homePad.position);
+        drone.SetStandby(homePad.position);
         ResetPackage(false);
         fieldMarker.gameObject.SetActive(false);
+        rescueTarget.gameObject.SetActive(false);
         SetStorm(0f);
         RefreshCampaignProgress();
         UpdateDisplay();
@@ -116,15 +140,9 @@ public sealed class MissionController : MonoBehaviour
         var input = QuestInput.Current;
         if (State == MissionState.FreeFlight)
         {
-            if (input.leftSecondaryDown)
-            {
-                selectedMode = selectedMode == FlightMode.Assist ? FlightMode.Manual : FlightMode.Assist;
-                drone.SetFlightMode(selectedMode);
-                PlayerPrefs.SetInt("flightMode", (int)selectedMode);
-            }
-            if (input.leftPrimaryDown) SelectStory(1);
-            if (input.rightStickClickDown) SelectStory(-1);
-            if (input.rightPrimaryDown) StartStory();
+            if (input.leftPrimaryDown) MoveMenu(1);
+            if (input.rightStickClickDown) MoveMenu(-1);
+            if (input.rightPrimaryDown) ActivateMenuSelection();
         }
         else if (State == MissionState.Active)
         {
@@ -138,6 +156,7 @@ public sealed class MissionController : MonoBehaviour
                 State = MissionState.Failed;
                 SetStorm(0f);
                 presentation.PlayWarning();
+                Speak("SAR COMMAND", "機体信号を喪失。救助計画を再構成する。", 6f);
             }
             else
             {
@@ -163,6 +182,54 @@ public sealed class MissionController : MonoBehaviour
         }
 
         UpdateDisplay();
+    }
+
+    private void MoveMenu(int direction)
+    {
+        var count = menuPage == MenuPage.Main ? 3 : menuPage == MenuPage.Missions ? 4 : menuPage == MenuPage.Practice ? 1 : 3;
+        menuSelection = (menuSelection + direction + count) % count;
+        QuestInput.PulseRight(0.08f, 0.04f);
+    }
+
+    private void ActivateMenuSelection()
+    {
+        if (menuPage == MenuPage.Main)
+        {
+            menuPage = menuSelection == 0 ? MenuPage.Missions : menuSelection == 1 ? MenuPage.Practice : MenuPage.Settings;
+            menuSelection = 0;
+            if (menuPage == MenuPage.Practice)
+            {
+                drone.BeginMission(homePad.position);
+                drone.SetWind(Vector3.zero);
+                SetStorm(0f);
+                Speak("FLIGHT SCHOOL", "基地周辺で安全に操縦を練習できる。", 4f);
+            }
+            return;
+        }
+        if (menuPage == MenuPage.Practice)
+        {
+            menuPage = MenuPage.Main;
+            drone.SetStandby(homePad.position);
+            return;
+        }
+        if (menuPage == MenuPage.Missions)
+        {
+            if (menuSelection == 0) { StartStory(); return; }
+            if (menuSelection == 1) SelectStory(1);
+            else if (menuSelection == 2) ToggleFlightMode();
+            else { menuPage = MenuPage.Main; menuSelection = 0; }
+            return;
+        }
+        if (menuSelection == 0) ToggleFlightMode();
+        else if (menuSelection == 1) { views.CycleMode(); views.missionHud.gameObject.SetActive(true); }
+        else { menuPage = MenuPage.Main; menuSelection = 0; }
+    }
+
+    private void ToggleFlightMode()
+    {
+        selectedMode = selectedMode == FlightMode.Assist ? FlightMode.Manual : FlightMode.Assist;
+        drone.SetFlightMode(selectedMode);
+        PlayerPrefs.SetInt("flightMode", (int)selectedMode);
     }
 
     private void SelectStory(int direction)
@@ -201,7 +268,9 @@ public sealed class MissionController : MonoBehaviour
         fpv.SetThermalAvailable(Story.action == StoryAction.Scan, Story.targetSite);
         ResetPackage(Story.action == StoryAction.Deliver);
         fieldMarker.gameObject.SetActive(false);
+        rescueTarget.gameObject.SetActive(false);
         SetStorm(Story.storm);
+        Speak("SAR COMMAND", Story.routeOne, 7f);
         QuestInput.PulseRight(0.25f, 0.12f);
     }
 
@@ -214,13 +283,16 @@ public sealed class MissionController : MonoBehaviour
                 if (input.rightPrimaryDown)
                 {
                     distressAccepted = true;
+                    Speak("MAYDAY", "応答を確認。現場上空で3秒間、低速ホバリング。", 5f);
                     QuestInput.PulseRight(0.45f, 0.18f);
                 }
                 else if (Time.unscaledTime >= distressOfferUntil)
                 {
                     distressOffered = false;
                     distressMissed = true;
+                    rescueTarget.gameObject.SetActive(false);
                     jobPenalty += 75;
+                    Speak("SAR NET", Story.routeTwo, 7f);
                     QuestInput.PulseRight(0.2f, 0.35f);
                 }
                 else return;
@@ -235,6 +307,7 @@ public sealed class MissionController : MonoBehaviour
                     distressOffered = false;
                     actionProgress = 0f;
                     presentation.PlaySuccess();
+                    Speak("SAR NET", Story.routeTwo, 7f);
                     QuestInput.PulseRight(0.65f, 0.25f);
                 }
                 return;
@@ -245,12 +318,16 @@ public sealed class MissionController : MonoBehaviour
             {
                 distressOffered = true;
                 distressOfferUntil = Time.unscaledTime + 8f;
+                ShowRescueTarget(distressSite);
                 presentation.PlayWarning();
+                Speak("MAYDAY", $"{missionSites[distressSite].name}から救難信号。8秒以内に応答せよ。", 8f);
             }
+            else if (routeStep == 1) Speak("SAR NET", Story.routeTwo, 7f);
             if (routeStep == 2)
             {
                 Stage = StoryStage.Objective;
                 distressOffered = false;
+                Speak("FIELD OPS", Story.objective, 6f);
             }
             QuestInput.PulseRight(0.3f, 0.15f);
             return;
@@ -260,7 +337,8 @@ public sealed class MissionController : MonoBehaviour
         {
             var close = Vector3.Distance(drone.transform.position, ObjectiveTarget.position) <= 5f;
             var stable = body.linearVelocity.magnitude < 1.6f;
-            actionProgress = Story.holdSeconds <= 0f ? 0f : close && stable ? actionProgress + Time.deltaTime : 0f;
+            var sensorReady = Story.action != StoryAction.Scan || fpv.Thermal;
+            actionProgress = Story.holdSeconds <= 0f ? 0f : ActionHoldReady(close, stable, sensorReady) ? actionProgress + Time.deltaTime : 0f;
             var held = actionProgress >= Story.holdSeconds;
             if (Story.action == StoryAction.Relay)
             {
@@ -268,7 +346,7 @@ public sealed class MissionController : MonoBehaviour
             }
             else if (input.rightTriggerDown)
             {
-                if (close && held && (Story.action == StoryAction.Deliver ? DeliveryReady() : stable)) CompleteObjective();
+                if (held && sensorReady && ActionReady(Story.action, close, stable, DeliveryReady())) CompleteObjective();
                 else jobPenalty += 100;
             }
             return;
@@ -303,6 +381,7 @@ public sealed class MissionController : MonoBehaviour
         }
         Stage = StoryStage.ReturnHome;
         presentation.PlaySuccess();
+        Speak("SAR COMMAND", "現地作業を確認。基地へ帰投・着陸せよ。", 5f);
         QuestInput.PulseRight(0.55f, 0.22f);
     }
 
@@ -313,14 +392,16 @@ public sealed class MissionController : MonoBehaviour
     {
         State = MissionState.FreeFlight;
         drone.maxHorizontalSpeed = freeFlightSpeed;
-        drone.BeginMission(homePad.position);
+        drone.SetStandby(homePad.position);
         drone.SetBatteryDrain(1f);
         drone.SetWind(Vector3.zero);
         fpv.SetThermalAvailable(false);
         ResetPackage(false);
         fieldMarker.gameObject.SetActive(false);
+        rescueTarget.gameObject.SetActive(false);
         SetStorm(0f);
         abortConfirmationUntil = 0f;
+        radioUntil = 0f;
     }
 
     private void CompleteStory()
@@ -354,6 +435,8 @@ public sealed class MissionController : MonoBehaviour
         drone.SetWind(Vector3.zero);
         drone.SetBatteryDrain(1f);
         SetStorm(0f);
+        Speak("SAR NET", Story.success, 12f);
+        rescueTarget.gameObject.SetActive(false);
     }
 
     private void RefreshCampaignProgress()
@@ -361,16 +444,39 @@ public sealed class MissionController : MonoBehaviour
         completedStories = 0;
         completedDistressCalls = 0;
         var readiness = 0f;
+        for (var site = 0; site < siteRestored.Length; site++) siteRestored[site] = false;
         foreach (var story in StoryCatalog.All)
         {
             var best = PlayerPrefs.GetInt($"best_story_{story.code}", 0);
             var distress = PlayerPrefs.GetInt($"distress_story_{story.code}", 0) != 0;
-            if (best > 0) completedStories++;
+            if (best > 0)
+            {
+                completedStories++;
+                siteRestored[story.targetSite] = true;
+            }
             if (distress) completedDistressCalls++;
             readiness += Mathf.Clamp01(best / 900f + (distress ? 0.1f : 0f));
         }
         networkReadiness = Mathf.RoundToInt(readiness / StoryCatalog.All.Length * 100f);
-        ApplyWorldProgress();
+        UpdateRecoveryWindows();
+    }
+
+    private void UpdateRecoveryWindows()
+    {
+        var sites = new[] { 1, 7 };
+        for (var i = 0; i < recoveryWindows.Length; i++)
+        {
+            var material = recoveryWindows[i].sharedMaterial;
+            var color = RecoveryColor(recoveryWindowColors[i], siteRestored[sites[i]]);
+            material.color = color;
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+        }
+    }
+
+    private static Color RecoveryColor(Color color, bool restored)
+    {
+        var brightness = restored ? 1f : 0.22f;
+        return new Color(color.r * brightness, color.g * brightness, color.b * brightness, color.a);
     }
 
     private static int FindUnlockedStory()
@@ -453,7 +559,7 @@ public sealed class MissionController : MonoBehaviour
         packageBody.useGravity = false;
         packageCollider.enabled = false;
         package.SetParent(drone.transform, false);
-        package.localPosition = new Vector3(0f, -0.28f, 0f);
+        package.localPosition = visible ? new Vector3(0f, -0.28f, 0f) : Vector3.zero;
         package.localRotation = Quaternion.identity;
         package.gameObject.SetActive(visible);
     }
@@ -469,25 +575,6 @@ public sealed class MissionController : MonoBehaviour
         return offset.magnitude;
     }
 
-    private void ApplyWorldProgress()
-    {
-        for (var site = 0; site < missionSites.Length; site++)
-        {
-            var restored = false;
-            for (var storyIndex = 0; storyIndex < StoryCatalog.All.Length && !restored; storyIndex++)
-            {
-                var story = StoryCatalog.All[storyIndex];
-                restored = story.targetSite == site && PlayerPrefs.GetInt($"best_story_{story.code}", 0) > 0 ||
-                           storyIndex % 3 == 0 && DistressSiteFor(storyIndex) == site && PlayerPrefs.GetInt($"distress_story_{story.code}", 0) != 0;
-            }
-            var light = siteLights[site];
-            if (light == null) continue;
-            restoredSites[site] = restored;
-            light.intensity = restored ? 24f : 5f;
-            light.range = restored ? 24f : 10f;
-        }
-    }
-
     private static int DistressSiteFor(int storyIndex)
     {
         var story = StoryCatalog.All[storyIndex];
@@ -499,8 +586,20 @@ public sealed class MissionController : MonoBehaviour
 
     private static bool DistressHoldReady(float distance, float speed) => distance <= 8f && speed < 2f;
 
-    private static bool HasFreshSuccess(int site, int targetSite, int distressSite, bool returning, bool distressDone)
-        => returning && site == targetSite || distressDone && site == distressSite;
+    private static bool ActionHoldReady(bool close, bool stable, bool sensorReady) => close && stable && sensorReady;
+
+    private static bool ActionReady(StoryAction action, bool close, bool stable, bool deliveryReady)
+        => action == StoryAction.Deliver ? deliveryReady : close && stable;
+
+    private void ShowRescueTarget(int siteIndex)
+    {
+        var position = missionSites[siteIndex].position + new Vector3(2.4f, 0f, 1.5f);
+        var terrain = Terrain.activeTerrain;
+        if (terrain != null) position.y = terrain.SampleHeight(position) + terrain.transform.position.y;
+        rescueTarget.position = position;
+        rescueTarget.rotation = Quaternion.Euler(0f, siteIndex * 47f, 0f);
+        rescueTarget.gameObject.SetActive(true);
+    }
 
     private string ModifierName() => MissionModifier switch
     {
@@ -559,22 +658,28 @@ public sealed class MissionController : MonoBehaviour
             RenderSettings.skybox.SetColor("_GroundColor", Color.Lerp(new Color(0.2f, 0.24f, 0.29f), new Color(0.32f, 0.28f, 0.34f), storyProgress));
         }
         RenderSettings.fogColor = weatherFog;
-        RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.4f, 0.5f, 0.63f), new Color(0.52f, 0.5f, 0.58f), storyProgress);
-        RenderSettings.fogStartDistance = Mathf.Lerp(80f, 25f, strength);
-        RenderSettings.fogEndDistance = Mathf.Lerp(420f, 100f, strength);
+        var ambientDimmer = Mathf.Lerp(1f, 0.82f, strength);
+        RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.48f, 0.58f, 0.72f), new Color(0.58f, 0.52f, 0.62f), storyProgress) * ambientDimmer;
+        RenderSettings.ambientEquatorColor = Color.Lerp(new Color(0.38f, 0.45f, 0.54f), new Color(0.5f, 0.44f, 0.5f), storyProgress) * ambientDimmer;
+        RenderSettings.ambientGroundColor = Color.Lerp(new Color(0.32f, 0.4f, 0.5f), new Color(0.44f, 0.36f, 0.42f), storyProgress) * ambientDimmer;
+        RenderSettings.fogStartDistance = Mathf.Lerp(90f, 25f, strength);
+        RenderSettings.fogEndDistance = Mathf.Lerp(650f, 100f, strength);
     }
 
     private void UpdateDisplay()
     {
         if (statusText == null || drone == null) return;
+        fpv.SetPanelVisible(State != MissionState.FreeFlight && views.CurrentMode == ViewMode.Operator);
 
         var objective = CurrentObjective;
         var distance = Vector3.Distance(drone.transform.position, objective.position);
         var elapsed = State == MissionState.Active ? Time.time - missionStart : 0f;
         var navigationAvailable = State != MissionState.Active || NavigationAvailable;
+        briefingIndex.text = Story.code;
         UpdateObjectiveLights(navigationAvailable ? objective : null);
-        var warning = !drone.MotorsArmed ? "MOTORS OFF  /  B ARM" : drone.GeofenceWarning ? "GEOFENCE  /  RETURN HOME" : drone.BatteryPercent < 20f ? "LOW BATTERY" : State == MissionState.Active && terrainAlert ? "PULL UP" : !navigationAvailable ? "NAV SIGNAL LOST" : "";
+        var warning = drone.IsStandby ? "STANDBY  /  SELECT FLIGHT" : !drone.MotorsArmed ? "MOTORS OFF  /  B ARM" : drone.ReturningHome ? "RTH  /  AUTO LANDING" : drone.GeofenceWarning ? "GEOFENCE  /  RETURN HOME" : drone.BatteryPercent < 20f ? "LOW BATTERY" : State == MissionState.Active && terrainAlert ? "PULL UP" : !navigationAvailable ? "NAV SIGNAL LOST" : "";
         var heading = Mathf.Repeat(drone.transform.eulerAngles.y, 360f);
+        headingValue.text = $"{Mathf.RoundToInt(heading) % 360:000}°";
         var objectiveDirection = objective.position - drone.transform.position;
         var objectiveBearing = Mathf.Repeat(Mathf.Atan2(objectiveDirection.x, objectiveDirection.z) * Mathf.Rad2Deg, 360f);
         var turn = Mathf.DeltaAngle(heading, objectiveBearing);
@@ -585,60 +690,124 @@ public sealed class MissionController : MonoBehaviour
         var groundClearance = terrain == null ? altitude : Mathf.Max(0f, drone.transform.position.y - terrain.SampleHeight(drone.transform.position) - terrain.transform.position.y);
         telemetryText.transform.parent.gameObject.SetActive(warning.Length > 0);
         telemetryText.text = warning;
+        radioText.transform.parent.gameObject.SetActive(Time.unscaledTime < radioUntil);
+        thermalOverlay.enabled = fpv.Thermal;
+        var distressHold = State == MissionState.Active && Stage == StoryStage.Route && distressAccepted && !distressCompleted && distance <= 12f;
+        var fieldHold = State == MissionState.Active && Stage == StoryStage.Objective && Story.holdSeconds > 0f && distance <= 8f;
+        var fieldCue = State == MissionState.Active && Stage == StoryStage.Objective && Story.holdSeconds <= 0f && distance <= 10f;
+        actionLabel.transform.parent.gameObject.SetActive(distressHold || fieldHold || fieldCue);
+        if (distressHold || fieldHold || fieldCue)
+        {
+            var ready = ActionReady(Story.action, distance <= 5f, body.linearVelocity.magnitude < 1.6f, DeliveryReady());
+            actionLabel.text = distressHold ? "SIGNAL LOCK" : fieldCue ? ready ? Story.action == StoryAction.Deliver ? "DROP READY" : "MARK READY" : "STABILIZE" : Story.action == StoryAction.Scan && !fpv.Thermal ? "THERMAL OFF" : Story.action == StoryAction.Scan ? "THERMAL SCAN" : "RELAY LINK";
+            var progress = fieldCue ? ready ? 1f : 0f : actionProgress / (distressHold ? DistressHoldSeconds : Story.holdSeconds);
+            actionFill.rectTransform.localScale = new Vector3(Mathf.Clamp01(progress), 1f, 1f);
+        }
         speedFill.rectTransform.localScale = new Vector3(Mathf.Clamp01(horizontalSpeed / drone.maxHorizontalSpeed), 1f, 1f);
         altitudeFill.rectTransform.localScale = new Vector3(Mathf.Clamp01(groundClearance / 30f), 1f, 1f);
         batteryFill.rectTransform.localScale = new Vector3(drone.BatteryPercent / 100f, 1f, 1f);
-        speedValue.text = $"SPD\n{horizontalSpeed:0.0} m/s";
-        altitudeValue.text = $"AGL\n{groundClearance:0.0} m";
-        batteryValue.text = $"BAT\n{drone.BatteryPercent:0}%";
-        altitudeFill.color = terrainAlert ? new Color(1f, 0.34f, 0.08f) : new Color(0.18f, 0.9f, 1f);
-        batteryFill.color = drone.BatteryPercent < 20f ? new Color(1f, 0.34f, 0.08f) : drone.BatteryPercent < 40f ? new Color(1f, 0.75f, 0.15f) : new Color(0.18f, 0.9f, 1f);
+        speedValue.text = $"<b>{horizontalSpeed:0.0}</b> <size=15><color=#A5B5BC>m/s</color></size>";
+        altitudeValue.text = $"<b>{groundClearance:0.0}</b> <size=15><color=#A5B5BC>m AGL</color></size>";
+        batteryValue.text = $"<b>{drone.BatteryPercent:0}</b><size=15><color=#A5B5BC>%</color></size>";
+        altitudeFill.color = terrainAlert ? new Color(1f, 0.34f, 0.08f) : Color.white;
+        batteryFill.color = drone.BatteryPercent < 20f ? new Color(1f, 0.34f, 0.08f) : drone.BatteryPercent < 40f ? new Color(1f, 0.75f, 0.15f) : Color.white;
         windNeedle.gameObject.SetActive(drone.Wind.magnitude >= 0.05f);
         windNeedle.localRotation = Quaternion.Euler(0f, 0f, -Mathf.DeltaAngle(heading, windBearing));
-        windValue.text = drone.Wind.magnitude < 0.05f ? "WIND\nCALM" : $"WIND\n{drone.Wind.magnitude:0.0} m/s";
+        windValue.text = drone.Wind.magnitude < 0.05f ? "<b>CALM</b>" : $"<b>{drone.Wind.magnitude:0.0}</b> <size=15><color=#A5B5BC>m/s</color></size>";
         navigationNeedle.gameObject.SetActive(navigationAvailable);
         navigationNeedle.localRotation = Quaternion.Euler(0f, 0f, -turn);
-        navigationValue.text = navigationAvailable ? $"NAV\n{distance:0} m" : "NAV\nNO FIX";
+        navigationValue.text = navigationAvailable ? $"<b>{distance:0}</b> <size=15><color=#A5B5BC>m</color></size>" : "<b>NO FIX</b>";
 
         var roll = Mathf.DeltaAngle(0f, drone.transform.eulerAngles.z);
         var pitch = Mathf.DeltaAngle(0f, drone.transform.eulerAngles.x);
-        artificialHorizon.localRotation = Quaternion.Euler(0f, 0f, roll);
+        artificialHorizon.localRotation = Quaternion.Euler(0f, 0f, -roll);
         artificialHorizon.anchoredPosition = new Vector2(0f, Mathf.Clamp(pitch * 3f, -90f, 90f));
 
         if (State == MissionState.FreeFlight)
         {
-            var best = PlayerPrefs.GetInt(BestKey, 0);
-            var style = PlayerPrefs.GetString($"style_story_{Story.code}", "");
-            var record = best > 0 ? $"CLEARED  /  BEST {best}{(style.Length > 0 ? $"  /  {style}" : "")}" : "NEW MISSION";
-            statusText.text = $"{ActName}   /   STORY FLIGHT {SelectedStory + 1:00} / {StoryCatalog.All.Length:00}   3-5 MIN\n\n" +
-                              $"A / 1   START: {Story.title}\n{record}  /  {Story.briefing}\n\n" +
-                              $"SPECIAL  {ModifierName()}\n救助ネットワーク {networkReadiness}%  /  完了 {completedStories}/{StoryCatalog.All.Length}  /  解放 {unlockedStory + 1}/{StoryCatalog.All.Length}  /  SOS {completedDistressCalls}\n" +
-                              $"X / 2 NEXT   R-STICK / 3 PREV   Y / M 操作: {selectedMode}\n" +
-                              "L-STICK 高度/旋回   R-STICK 移動   B/R 自動帰還   GRIP/C 視点";
+            UpdateMenuButtons();
+            if (menuPage == MenuPage.Main)
+                statusText.text = MissionCard("WHITEOUT  //  MOUNTAIN RESCUE", "DRONE RESCUE", "雪山の救助ネットワークへ。\n物語任務とリアルなFPVフライトを開始する。\n<color=#81909B>NETWORK {networkReadiness}%  //  CLEARED {completedStories}/{StoryCatalog.All.Length}</color>", "[A / 1] SELECT     [X / 2] NEXT     [R-STICK / 3] PREV");
+            else if (menuPage == MenuPage.Missions)
+            {
+                var best = PlayerPrefs.GetInt(BestKey, 0);
+                statusText.text = MissionCard($"{ActName}  //  FLIGHT {SelectedStory + 1:00}/{StoryCatalog.All.Length:00}", Story.title,
+                    $"{Intel("STATUS", best > 0 ? $"CLEARED  //  BEST {best}" : "NEW MISSION")}\n{Story.briefing}\n{Intel("FLIGHT PROFILE", ModifierName())}", "[A / 1] SELECT     [X / 2] NEXT     [R-STICK / 3] PREV");
+            }
+            else if (menuPage == MenuPage.Practice)
+                statusText.text = MissionCard("FLIGHT SCHOOL  //  PRACTICE RANGE", "FREE FLIGHT", "基地周辺で安全に操縦を練習する。\n左スティックで高度・ヨー、右スティックで前後左右。\n<color=#81909B>アシストは高度維持とSELF-LEVEL付き。B / Rで離陸・着陸。</color>", "[A / 1] SELECT     [X / 2] NEXT     [R-STICK / 3] PREV");
+            else
+                statusText.text = MissionCard("SYSTEM  //  PILOT SETTINGS", "SETTINGS", $"{Intel("FLIGHT MODE", selectedMode.ToString().ToUpper())}\n{Intel("STABILIZATION", selectedMode == FlightMode.Assist ? "STRONG / SELF-LEVEL" : "OFF / FPV RATE")}\n{Intel("CAMERA", views.CurrentMode.ToString().ToUpper())}\n視点はGRIP / Cでも切り替え可能。\n<color=#81909B>アシストは高度維持と強旋回時の水平復帰付き。</color>", "[A / 1] SELECT     [X / 2] NEXT     [R-STICK / 3] PREV");
             return;
         }
+
+        foreach (var button in menuButtons) button.gameObject.SetActive(false);
+        statusText.rectTransform.offsetMax = new Vector2(-28f, -42f);
 
         if (State == MissionState.Active)
         {
             if (elapsed < 7f)
-                statusText.text = $"{ActName}   /   MISSION {Story.code}\n{Story.title}\n\n{Story.briefing}\nSPECIAL  {ModifierName()}\n\n出動せよ。  {AbortHint()}";
+                statusText.text = MissionCard($"{ActName}  //  OPERATION {Story.code}", Story.title,
+                    $"{Intel("PRIMARY", Story.objective)}\n{Story.briefing}\n{Intel("FLIGHT PROFILE", ModifierName())}", AbortHint());
             else if (Stage == StoryStage.Route)
                 statusText.text = distressAccepted && !distressCompleted
-                    ? $"MAYDAY  /  OPTIONAL RESCUE\n\n{missionSites[distressSite].name}の上空で低速ホバリング。\nSIGNAL {actionProgress:0.0}/{DistressHoldSeconds:0.0}s   DISTANCE {DistanceReadout(distance)}   {AbortHint()}"
-                    : $"MISSION {Story.code}  /  LEG {routeStep + 1}/2\n\n{(routeStep == 0 ? Story.routeOne : Story.routeTwo)}\nDISTANCE  {DistanceReadout(distance)}   {AbortHint()}{DistressOffer()}";
+                    ? MissionCard("PRIORITY SIGNAL  //  MAYDAY", "OPTIONAL RESCUE",
+                        $"{Intel("ACTION", $"{missionSites[distressSite].name}の上空で低速ホバリング")}\nSIGNAL {actionProgress:0.0}/{DistressHoldSeconds:0.0}s  //  RANGE {DistanceReadout(distance)}", AbortHint())
+                    : MissionCard($"OPERATION {Story.code}  //  ROUTE {routeStep + 1}/2", "ROUTE UPDATE",
+                        $"{Intel("CHECKPOINT", RouteTarget.name)}\n{Intel("RANGE", DistanceReadout(distance))}{DistressOffer()}", AbortHint());
             else if (Stage == StoryStage.Objective)
-                statusText.text = $"MISSION {Story.code}  /  FIELD TASK\n\n{Story.objective}\n{ActionPrompt()}\nDISTANCE  {DistanceReadout(distance)}   {AbortHint()}";
+                statusText.text = MissionCard($"OPERATION {Story.code}  //  ON STATION", "FIELD TASK",
+                    $"{Intel("PRIMARY", Story.objective)}\n{ActionPrompt()}\n{Intel("RANGE", DistanceReadout(distance))}", AbortHint());
             else
-                statusText.text = $"MISSION {Story.code}  /  RETURN\n\n{Story.success}{DistressOutcome()}\n基地へ帰還・着陸せよ。 B / R 自動帰還\nHOME  {DistanceReadout(distance)}   {AbortHint()}";
+                statusText.text = MissionCard($"OPERATION {Story.code}  //  RETURN", "EXTRACTION",
+                    $"{Intel("STATUS", "FIELD TASK COMPLETE")}{DistressOutcome()}\n{Intel("HOME", $"基地へ帰還・着陸  //  {DistanceReadout(distance)}")}", $"[B / R] AUTO RETURN     {AbortHint()}");
             return;
         }
 
         statusText.text = State == MissionState.Completed
-            ? $"MISSION COMPLETE  /  {Story.title}\n\n{Story.success}\n{lastResult.score} PTS   GRADE {lastResult.grade}   {lastResult.elapsedSeconds:0}s\nBAT {lastResult.batteryPercent:0}%   IMPACT {lastResult.collisions}   PENALTY -{lastResult.jobPenalty}\nPILOT STYLE  {lastResult.pilotStyle}   FIELD +{fieldBonus}{(distressCompleted ? "   SOS +150" : "")}\n救助ネットワーク {networkReadiness}%  /  完了 {completedStories}/{StoryCatalog.All.Length}  /  SOS {completedDistressCalls}\n\nA / 1  REPLAY    X / 2  NEXT STORY"
-            : $"SIGNAL LOST  /  {Story.title}\n\n任務は完了しなかった。\n嵐が強まる前に再出動せよ。\n\nA / 1  RETRY    X / 2  MENU";
+            ? MissionCard($"AFTER ACTION REPORT  //  OPERATION {Story.code}", "MISSION COMPLETE",
+                $"{Story.success}\n{Intel("RESULT", $"{lastResult.score} PTS  //  GRADE {lastResult.grade}  //  {lastResult.elapsedSeconds:0}s")}\nBAT {lastResult.batteryPercent:0}%  //  IMPACT {lastResult.collisions}  //  PENALTY -{lastResult.jobPenalty}\nPILOT STYLE {lastResult.pilotStyle}  //  FIELD +{fieldBonus}{(distressCompleted ? "  //  SOS +150" : "")}\n<color=#81909B>NETWORK {networkReadiness}%  //  CLEARED {completedStories}/{StoryCatalog.All.Length}</color>",
+                "[A / 1] REPLAY     [X / 2] NEXT STORY")
+            : MissionCard($"UPLINK TERMINATED  //  OPERATION {Story.code}", "SIGNAL LOST",
+                "任務は完了しなかった。\n嵐が強まる前に再出動せよ。", "[A / 1] RETRY     [X / 2] MENU");
     }
 
     private static T Hud<T>(string name) where T : Component => GameObject.Find(name).GetComponent<T>();
+
+    private static string Intel(string label, string value) => $"<color=#38DCF2><b>{label}</b></color>  {value}";
+
+    private void UpdateMenuButtons()
+    {
+        var labels = menuPage == MenuPage.Main
+            ? new[] { "START FLIGHT", "PRACTICE RANGE", "SETTINGS" }
+            : menuPage == MenuPage.Missions
+                ? new[] { "DEPLOY", "NEXT MISSION", $"FLIGHT: {selectedMode.ToString().ToUpper()}", "BACK" }
+                : menuPage == MenuPage.Practice
+                    ? new[] { "BACK TO MENU" }
+                : new[] { $"FLIGHT: {selectedMode.ToString().ToUpper()}", $"CAMERA: {views.CurrentMode.ToString().ToUpper()}", "BACK" };
+        statusText.rectTransform.offsetMax = new Vector2(-330f, -42f);
+        for (var i = 0; i < menuButtons.Length; i++)
+        {
+            var active = i < labels.Length;
+            menuButtons[i].gameObject.SetActive(active);
+            if (!active) continue;
+            var selected = i == menuSelection;
+            menuButtons[i].color = selected ? new Color(1f, 0.3f, 0.08f, 0.94f) : new Color(0.08f, 0.13f, 0.17f, 0.94f);
+            menuButtonTexts[i].text = selected ? $">  {labels[i]}" : labels[i];
+            menuButtonTexts[i].color = selected ? Color.white : new Color(0.75f, 0.84f, 0.87f);
+        }
+    }
+
+    private static string MissionCard(string channel, string title, string body, string footer)
+        => $"<size=15><color=#81909B>{channel}</color></size>\n<size=32><b>{title}</b></size>\n<size=18>{body}</size>\n<size=14><color=#FF6A2A><b>{footer}</b></color></size>";
+
+    private void Speak(string channel, string line, float seconds)
+    {
+        presentation.PlayRadio();
+        radioText.text = $"<size=16><color=#FF6A2A><b>{channel}  //  LIVE</b></color></size>\n<size=28>{line}</size>";
+        radioUntil = Time.unscaledTime + seconds;
+        radioText.transform.parent.gameObject.SetActive(true);
+    }
 
     private string ActionPrompt()
     {
@@ -657,15 +826,15 @@ public sealed class MissionController : MonoBehaviour
 
     private void UpdateObjectiveLights(Transform objective)
     {
-        var pulse = 8f + Mathf.Sin(Time.unscaledTime * 4f) * 4f;
         for (var i = 0; i < siteLights.Length; i++)
         {
-            var lit = restoredSites[i] || State == MissionState.Active && HasFreshSuccess(i, Story.targetSite, distressSite, Stage == StoryStage.ReturnHome, distressCompleted);
-            siteLights[i].intensity = (lit ? 24f : 5f) + (objective == missionSites[i] ? pulse : 0f);
-            siteLights[i].range = (lit ? 24f : 10f) + (objective == missionSites[i] ? 4f : 0f);
+            var selected = State == MissionState.Active && objective == missionSites[i];
+            siteLights[i].intensity = selected ? 1.5f : 0f;
+            siteLights[i].range = selected ? 14f : 0f;
         }
-        homeLight.intensity = 18f + (objective == homePad ? pulse : 0f);
-        homeLight.range = 10f + (objective == homePad ? 4f : 0f);
+        var homeSelected = State == MissionState.Active && objective == homePad;
+        homeLight.intensity = homeSelected ? 1.2f : 0f;
+        homeLight.range = homeSelected ? 12f : 0f;
     }
 
     private static string Grade(int score) => score >= 900 ? "S" : score >= 750 ? "A" : score >= 600 ? "B" : score >= 450 ? "C" : "D";
