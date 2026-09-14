@@ -74,7 +74,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         views.drone = drone;
         views.pose = camera.GetComponent<QuestPoseDriver>();
         views.monitor = monitor;
-        CreateHud(camera, out var status, out var telemetry, out var radio, out var horizon, out var menuButtons, out var menuButtonTexts);
+        CreateHud(camera, out var status, out var telemetry, out var horizon, out var menuButtons, out var menuButtonTexts);
         views.hud = telemetry.canvas;
         views.missionHud = status.canvas;
         views.Build(camera);
@@ -94,7 +94,6 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         };
         missions.statusText = status;
         missions.telemetryText = telemetry;
-        missions.radioText = radio;
         missions.menuButtons = menuButtons;
         missions.menuButtonTexts = menuButtonTexts;
         missions.artificialHorizon = horizon;
@@ -131,15 +130,15 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         data.SetHeights(0, 0, heights);
 
         var snow = new TerrainLayer();
-        snow.diffuseTexture = NoiseTexture(new Color(0.78f, 0.83f, 0.86f), 0.08f);
-        snow.tileSize = new Vector2(14f, 14f);
+        snow.diffuseTexture = Resources.Load<Texture2D>("snow-albedo-generated") ?? SnowTexture(new Color(0.78f, 0.83f, 0.86f), 0.08f);
+        snow.tileSize = new Vector2(24f, 24f);
         snow.smoothness = 0.18f;
         var windSnow = new TerrainLayer();
-        windSnow.diffuseTexture = NoiseTexture(new Color(0.58f, 0.72f, 0.82f), 0.045f);
+        windSnow.diffuseTexture = SnowTexture(new Color(0.58f, 0.72f, 0.82f), 0.045f);
         windSnow.tileSize = new Vector2(22f, 10f);
         windSnow.smoothness = 0.3f;
         var rock = new TerrainLayer();
-        rock.diffuseTexture = NoiseTexture(new Color(0.22f, 0.25f, 0.27f), 0.16f);
+        rock.diffuseTexture = Resources.Load<Texture2D>("alpine-rock-snow-generated") ?? NoiseTexture(new Color(0.22f, 0.25f, 0.27f), 0.16f);
         rock.tileSize = new Vector2(11f, 11f);
         rock.smoothness = 0.04f;
         data.terrainLayers = new[] { snow, windSnow, rock };
@@ -162,8 +161,8 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         terrainObject.transform.position = new Vector3(-270f, 0f, -105f);
         var terrain = terrainObject.GetComponent<Terrain>();
         terrain.drawInstanced = true;
-        terrain.detailObjectDistance = 45f;
-        terrain.heightmapPixelError = 8f;
+        terrain.detailObjectDistance = 60f;
+        terrain.heightmapPixelError = 4f;
         terrain.basemapDistance = 120f;
         return terrain;
     }
@@ -237,6 +236,21 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             pixels[y * 64 + x] = new Color(color.r + value, color.g + value, color.b + value);
         }
         texture.SetPixels(pixels);
+        texture.Apply(true, false);
+        return texture;
+    }
+
+    private static Texture2D SnowTexture(Color color, float variation)
+    {
+        var texture = NoiseTexture(color, variation);
+        var pixels = texture.GetPixels();
+        for (var y = 0; y < texture.height; y++)
+        for (var x = 0; x < texture.width; x++)
+        {
+            var ripple = Mathf.Sin((x + Mathf.Sin(y * 0.22f) * 5f) * 0.38f) * 0.018f;
+            pixels[y * texture.width + x] += new Color(ripple, ripple, ripple);
+        }
+        texture.SetPixels(pixels);
         texture.Apply(true, true);
         return texture;
     }
@@ -301,7 +315,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
     private void CreateAlpineEnvironment(Terrain terrain, Vector3 home, Vector3[] sites)
     {
         var random = new System.Random(2187);
-        for (var i = 0; i < 60; i++)
+        for (var i = 0; i < 100; i++)
         {
             var position = new Vector3((float)random.NextDouble() * 450f - 225f, 0f, (float)random.NextDouble() * 390f - 75f);
             if (Vector2.Distance(new Vector2(position.x, position.z), new Vector2(home.x, home.z)) < 12f ||
@@ -309,6 +323,13 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             position = OnTerrain(terrain, position);
             if (position.y < 18f) CreateFir(position, 0.8f + (float)random.NextDouble() * 0.8f);
         }
+        foreach (var placement in new[]
+                 {
+                     (new Vector3(-14f, 0f, 22f), 1.15f), (new Vector3(13f, 0f, 29f), 1.35f),
+                     (new Vector3(-25f, 0f, 43f), 1.55f), (new Vector3(24f, 0f, 50f), 1.2f),
+                     (new Vector3(-34f, 0f, 66f), 1.45f), (new Vector3(34f, 0f, 70f), 1.7f)
+                 })
+            CreateFir(OnTerrain(terrain, home + placement.Item1), placement.Item2);
         for (var i = 0; i < 20; i++)
         {
             var position = OnTerrain(terrain, new Vector3((float)random.NextDouble() * 450f - 225f, 0f, (float)random.NextDouble() * 400f - 70f));
@@ -677,6 +698,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
     {
         var part = CreatePart(primitive, parent, position, scale, color, rotation);
         part.name = name;
+        part.layer = LayerMask.NameToLayer("Ignore Raycast");
         Object.Destroy(part.GetComponent<Collider>());
     }
 
@@ -744,6 +766,11 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         vest.name = "RescueVest";
         var blanket = CreatePart(PrimitiveType.Cube, signal.transform, new Vector3(0.75f, 0.08f, 0.25f), new Vector3(1.4f, 0.06f, 1f), new Color(0.82f, 0.16f, 0.05f), Quaternion.Euler(0f, -18f, 0f));
         blanket.name = "EmergencyBlanket";
+        var waveArm = new GameObject("RescueWave").transform;
+        waveArm.SetParent(signal.transform, false);
+        waveArm.localPosition = new Vector3(-0.3f, 0.92f, 0f);
+        CreatePart(PrimitiveType.Cylinder, waveArm, new Vector3(0f, 0.24f, 0f), new Vector3(0.1f, 0.26f, 0.1f), Orange);
+        signal.AddComponent<RescueMotion>().waveArm = waveArm;
         foreach (var collider in signal.GetComponentsInChildren<Collider>()) Object.Destroy(collider);
         signal.SetActive(false);
         return signal;
@@ -767,14 +794,14 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         stormObject.transform.localPosition = new Vector3(0f, 8f, 14f);
         var storm = stormObject.AddComponent<ParticleSystem>();
         var main = storm.main;
-        main.maxParticles = 520;
+        main.maxParticles = 280;
         main.startLifetime = new ParticleSystem.MinMaxCurve(1.2f, 2.2f);
         main.startSpeed = 0f;
-        main.startSize = new ParticleSystem.MinMaxCurve(0.025f, 0.085f);
-        main.startColor = new Color(0.9f, 0.94f, 1f, 0.72f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.012f, 0.04f);
+        main.startColor = new Color(0.9f, 0.94f, 1f, 0.52f);
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         var emission = storm.emission;
-        emission.rateOverTime = 35f;
+        emission.rateOverTime = 8f;
         var shape = storm.shape;
         shape.shapeType = ParticleSystemShapeType.Box;
         shape.scale = new Vector3(34f, 14f, 30f);
@@ -784,17 +811,13 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         velocity.x = new ParticleSystem.MinMaxCurve(-0.35f, 0.35f);
         velocity.y = new ParticleSystem.MinMaxCurve(-1.8f, -0.7f);
         velocity.z = new ParticleSystem.MinMaxCurve(-0.35f, 0.35f);
-        var noise = storm.noise;
-        noise.enabled = true;
-        noise.strength = 0.45f;
-        noise.frequency = 0.55f;
         var renderer = storm.GetComponent<ParticleSystemRenderer>();
         renderer.renderMode = ParticleSystemRenderMode.Billboard;
         renderer.material = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit") ?? Shader.Find("Particles/Standard Unlit"));
         return storm;
     }
 
-    private static void CreateHud(Camera camera, out Text status, out Text telemetry, out Text radio, out RectTransform horizon, out Image[] menuButtons, out Text[] menuButtonTexts)
+    private static void CreateHud(Camera camera, out Text status, out Text telemetry, out RectTransform horizon, out Image[] menuButtons, out Text[] menuButtonTexts)
     {
         var canvas = UiCanvas("FpvHud", camera);
         var missionCanvas = UiCanvas("MissionHud", camera);
@@ -835,13 +858,12 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         telemetry.rectTransform.offsetMin = new Vector2(12f, 5f);
         telemetry.rectTransform.offsetMax = new Vector2(-12f, -5f);
 
-        var radioPanel = UiImage(canvas.transform, "RadioCaption", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 146f), new Vector2(900f, 88f), new Color(0.005f, 0.008f, 0.012f, 0.52f), new Vector2(0.5f, 0f));
-        UiImage(radioPanel.transform, "RadioRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 0f), Orange, new Vector2(0f, 0.5f));
-        radio = UiText(radioPanel.transform, "RadioSubtitle", 28, Color.white, TextAnchor.MiddleLeft);
-        radio.rectTransform.offsetMin = new Vector2(18f, 8f);
-        radio.rectTransform.offsetMax = new Vector2(-18f, -8f);
-        TextShadow(radio);
-        radioPanel.gameObject.SetActive(false);
+        var taskPanel = UiImage(canvas.transform, "TaskCuePanel", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(700f, 52f), new Color(0.008f, 0.014f, 0.02f, 0.82f), new Vector2(0.5f, 1f));
+        UiImage(taskPanel.transform, "TaskCueRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 0f), Cyan, new Vector2(0f, 0.5f));
+        var taskCue = UiText(taskPanel.transform, "TaskCue", 24, new Color(0.9f, 0.95f, 0.97f), TextAnchor.MiddleCenter);
+        taskCue.rectTransform.offsetMin = new Vector2(16f, 2f);
+        taskCue.rectTransform.offsetMax = new Vector2(-16f, -2f);
+        TextShadow(taskCue);
 
         Gauge(canvas.transform, "Speed", "H.S", Vector2.zero, new Vector2(48f, 36f), Vector2.zero, Color.white);
         Gauge(canvas.transform, "Altitude", "ALT", new Vector2(1f, 0f), new Vector2(-48f, 36f), new Vector2(1f, 0f), Color.white);
@@ -989,5 +1011,20 @@ public sealed class PrototypeBootstrap : MonoBehaviour
             Object.Destroy(material.mainTexture);
             Object.Destroy(material);
         }
+    }
+}
+
+public sealed class RescueMotion : MonoBehaviour
+{
+    public Transform waveArm;
+    public bool Relieved { get; private set; }
+
+    public void SetRelieved(bool value) => Relieved = value;
+
+    private void Update()
+    {
+        var phase = Time.time * 4f;
+        transform.localRotation = Quaternion.Euler(0f, Mathf.Sin(phase * 0.45f) * 14f, 0f);
+        waveArm.localRotation = Quaternion.Euler(0f, 0f, Relieved ? -128f + Mathf.Sin(phase * 0.5f) * 10f : -48f + Mathf.Sin(phase) * 34f);
     }
 }

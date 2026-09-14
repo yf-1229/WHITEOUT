@@ -30,6 +30,7 @@ public sealed class DroneController : MonoBehaviour
     public bool GeofenceWarning { get; private set; }
     public Vector3 Wind { get; private set; }
     public float MotorLoad { get; private set; }
+    public string AssistProfileName => assistProfile == 0 ? "SPORT" : assistProfile == 1 ? "CRUISE" : "CINEMA";
     public bool IsLanded => body.position.y <= homePosition.y + 0.5f && body.linearVelocity.sqrMagnitude < 0.35f;
 
     private Rigidbody body;
@@ -40,6 +41,7 @@ public sealed class DroneController : MonoBehaviour
     private float targetYaw;
     private float manualLift = 1f;
     private float batteryDrainMultiplier = 1f;
+    private int assistProfile = 1;
     private bool standby;
     private const float CrashSpeed = 6f;
 
@@ -113,6 +115,10 @@ public sealed class DroneController : MonoBehaviour
         targetAltitude = transform.position.y;
         targetYaw = transform.eulerAngles.y;
     }
+
+    public void CycleAssistProfile() => assistProfile = (assistProfile + 1) % 3;
+
+    public void SetAssistProfile(int profile) => assistProfile = Mathf.Clamp(profile, 0, 2);
 
     public void SetWind(Vector3 wind) => Wind = wind;
 
@@ -244,7 +250,7 @@ public sealed class DroneController : MonoBehaviour
     private void ApplyAssistedFlight(Vector3 desiredVelocity, float desiredAltitude, float yaw)
     {
         var planarVelocity = new Vector3(body.linearVelocity.x, 0f, body.linearVelocity.z);
-        var maxAcceleration = Mathf.Tan(maxTiltDegrees * Mathf.Deg2Rad) * Physics.gravity.magnitude;
+        var maxAcceleration = Mathf.Tan(AssistTiltLimit * Mathf.Deg2Rad) * Physics.gravity.magnitude;
         var desiredAcceleration = Vector3.ClampMagnitude((desiredVelocity - planarVelocity) * 2.2f, maxAcceleration);
         var desiredUp = (Vector3.up + desiredAcceleration / Physics.gravity.magnitude).normalized;
         var desiredForward = Vector3.ProjectOnPlane(Quaternion.Euler(0f, yaw, 0f) * Vector3.forward, desiredUp).normalized;
@@ -267,8 +273,11 @@ public sealed class DroneController : MonoBehaviour
         var tiltRate = body.angularVelocity - Vector3.Project(body.angularVelocity, bodyUp);
         if (Vector3.Dot(bodyUp, Vector3.up) < 0.3f)
             body.angularVelocity = Vector3.Project(body.angularVelocity, bodyUp);
-        body.AddTorque(Vector3.Cross(bodyUp, desiredUp) * assistTiltRecovery - tiltRate * assistTiltDamping, ForceMode.Acceleration);
+        body.AddTorque(Vector3.Cross(bodyUp, desiredUp) * assistTiltRecovery * AssistRecovery - tiltRate * assistTiltDamping * AssistRecovery, ForceMode.Acceleration);
     }
+
+    private float AssistTiltLimit => assistProfile == 0 ? maxTiltDegrees : assistProfile == 1 ? 23f : 18f;
+    private float AssistRecovery => assistProfile == 0 ? 1f : assistProfile == 1 ? 1.2f : 1.45f;
 
     private void ApplyAttitude(Quaternion desiredRotation)
     {

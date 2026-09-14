@@ -38,6 +38,22 @@ public static class ProjectConfigurator
         GraphicsSettings.defaultRenderPipeline = pipeline;
         QualitySettings.renderPipeline = pipeline;
         EnsureRuntimeShaders();
+        ConfigureTerrainTexture("Assets/Resources/snow-albedo-generated.png");
+        ConfigureTerrainTexture("Assets/Resources/alpine-rock-snow-generated.png");
+    }
+
+    private static void ConfigureTerrainTexture(string path)
+    {
+        if (AssetImporter.GetAtPath(path) is not TextureImporter texture || texture.maxTextureSize == 1024) return;
+        texture.wrapMode = TextureWrapMode.Repeat;
+        texture.maxTextureSize = 1024;
+        texture.textureCompression = TextureImporterCompression.CompressedHQ;
+        var android = texture.GetPlatformTextureSettings("Android");
+        android.overridden = true;
+        android.maxTextureSize = 1024;
+        android.format = TextureImporterFormat.ASTC_6x6;
+        texture.SetPlatformTextureSettings(android);
+        texture.SaveAndReimport();
     }
 
     private static void EnsureRuntimeShaders()
@@ -179,7 +195,15 @@ public static class ProjectConfigurator
         UnityEngine.Assertions.Assert.IsTrue(Mathf.Abs(levelMotorLoad - 1f) < 0.001f);
         UnityEngine.Assertions.Assert.IsTrue((float)assistedMotorLoad.Invoke(null, new object[] { 4f, 1f }) > levelMotorLoad);
         UnityEngine.Assertions.Assert.IsTrue((float)assistedMotorLoad.Invoke(null, new object[] { 0f, 0.6f }) > levelMotorLoad);
-        var forwardTilt = Mathf.Cos(drone.maxTiltDegrees * Mathf.Deg2Rad);
+        var assistTiltLimit = typeof(DroneController).GetProperty("AssistTiltLimit", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var assistRecovery = typeof(DroneController).GetProperty("AssistRecovery", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var savedAssistProfile = Mathf.Clamp(PlayerPrefs.GetInt("assistProfile", 1), 0, 2);
+        drone.SetAssistProfile(0);
+        var sportTilt = (float)assistTiltLimit.GetValue(drone);
+        drone.SetAssistProfile(2);
+        UnityEngine.Assertions.Assert.IsTrue((float)assistTiltLimit.GetValue(drone) < sportTilt && (float)assistRecovery.GetValue(drone) > 1f);
+        drone.SetAssistProfile(savedAssistProfile);
+        var forwardTilt = Mathf.Cos((float)assistTiltLimit.GetValue(drone) * Mathf.Deg2Rad);
         UnityEngine.Assertions.Assert.IsTrue(Mathf.Abs((float)assistedMotorLoad.Invoke(null, new object[] { 0f, forwardTilt }) * forwardTilt - 1f) < 0.001f);
         var resetObject = new GameObject("ResetPoseCheck");
         var resetDrone = resetObject.AddComponent<DroneController>();
@@ -213,7 +237,7 @@ public static class ProjectConfigurator
                 Physics.Simulate(0.02f);
             }
             var planarVelocity = new Vector3(resetBody.linearVelocity.x, 0f, resetBody.linearVelocity.z);
-            var maxAcceleration = Mathf.Tan(resetDrone.maxTiltDegrees * Mathf.Deg2Rad) * Physics.gravity.magnitude;
+            var maxAcceleration = Mathf.Tan((float)assistTiltLimit.GetValue(resetDrone) * Mathf.Deg2Rad) * Physics.gravity.magnitude;
             var desiredAcceleration = Vector3.ClampMagnitude((Vector3.forward * resetDrone.maxHorizontalSpeed - planarVelocity) * 2.2f, maxAcceleration);
             var desiredUp = (Vector3.up + desiredAcceleration / Physics.gravity.magnitude).normalized;
             var recoveredUp = Vector3.Dot(resetBody.rotation * Vector3.up, desiredUp);
@@ -244,6 +268,8 @@ public static class ProjectConfigurator
         UnityEngine.Assertions.Assert.AreEqual(4, rescueParts.Length);
         UnityEngine.Assertions.Assert.IsTrue(rescueParts.All(renderer => !renderer.isPartOfStaticBatch && !renderer.gameObject.activeInHierarchy));
         UnityEngine.Assertions.Assert.IsTrue(rescueParts.All(renderer => renderer.GetComponent<Collider>() == null));
+        var rescueMotion = Object.FindObjectsByType<RescueMotion>(FindObjectsInactive.Include, FindObjectsSortMode.None).Single();
+        UnityEngine.Assertions.Assert.IsNotNull(rescueMotion.waveArm);
         var thermalTargets = Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None).Where(renderer => renderer.name == "ThermalTrace").ToArray();
         UnityEngine.Assertions.Assert.AreEqual(8, thermalTargets.Length);
         UnityEngine.Assertions.Assert.IsTrue(thermalTargets.All(renderer => !renderer.enabled && !renderer.isPartOfStaticBatch));
@@ -267,11 +293,17 @@ public static class ProjectConfigurator
         UnityEngine.Assertions.Assert.IsTrue(landingLights.All(light => light.type == LightType.Spot && light.intensity == 0f));
 
         var viewer = Camera.main;
+        var generatedSnow = Resources.Load<Texture2D>("snow-albedo-generated");
+        var generatedRock = Resources.Load<Texture2D>("alpine-rock-snow-generated");
+        UnityEngine.Assertions.Assert.IsNotNull(generatedSnow);
+        UnityEngine.Assertions.Assert.IsNotNull(generatedRock);
+        UnityEngine.Assertions.Assert.AreEqual(generatedSnow, terrain.terrainData.terrainLayers[0].diffuseTexture);
+        UnityEngine.Assertions.Assert.AreEqual(generatedRock, terrain.terrainData.terrainLayers[2].diffuseTexture);
         var viewerGround = terrain.SampleHeight(viewer.transform.position) + terrain.transform.position.y;
         UnityEngine.Assertions.Assert.IsTrue(viewer.transform.position.y - viewerGround > 1.5f);
         var fpv = GameObject.Find("FPVCamera").GetComponent<Camera>();
         var storm = Object.FindAnyObjectByType<ParticleSystem>();
-        UnityEngine.Assertions.Assert.AreEqual(520, storm.main.maxParticles);
+        UnityEngine.Assertions.Assert.AreEqual(280, storm.main.maxParticles);
         UnityEngine.Assertions.Assert.AreEqual(ParticleSystemRenderMode.Billboard, storm.GetComponent<ParticleSystemRenderer>().renderMode);
         UnityEngine.Assertions.Assert.AreEqual(GameObject.Find("FPVCamera").transform, storm.transform.parent);
         var missions = Object.FindAnyObjectByType<MissionController>();
@@ -305,16 +337,13 @@ public static class ProjectConfigurator
         UnityEngine.Assertions.Assert.IsTrue(missions.rescueTarget.gameObject.activeSelf);
         var rescueTerrain = Terrain.activeTerrain;
         UnityEngine.Assertions.Assert.IsTrue(Mathf.Abs(missions.rescueTarget.position.y - rescueTerrain.SampleHeight(missions.rescueTarget.position) - rescueTerrain.transform.position.y) < 0.01f);
+        typeof(RescueMotion).GetMethod("Update", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(rescueMotion, null);
+        UnityEngine.Assertions.Assert.IsTrue(Quaternion.Angle(rescueMotion.waveArm.localRotation, Quaternion.identity) > 1f);
         missions.rescueTarget.gameObject.SetActive(false);
-        UnityEngine.Assertions.Assert.IsFalse(missions.radioText.transform.parent.gameObject.activeSelf);
-        var speak = typeof(MissionController).GetMethod("Speak", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        speak.Invoke(missions, new object[] { "SAR NET", "TEST LINE", 3f });
-        UnityEngine.Assertions.Assert.IsTrue(missions.radioText.text.Contains("SAR NET") && missions.radioText.text.Contains("TEST LINE"));
-        missions.radioText.transform.parent.gameObject.SetActive(false);
         var setStorm = typeof(MissionController).GetMethod("SetStorm", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         drone.SetWind(new Vector3(2f, 0f, -1f));
         setStorm.Invoke(missions, new object[] { 1f });
-        UnityEngine.Assertions.Assert.AreEqual(240f, storm.emission.rateOverTime.constant);
+        UnityEngine.Assertions.Assert.AreEqual(90f, storm.emission.rateOverTime.constant);
         UnityEngine.Assertions.Assert.IsTrue(Mathf.Abs(storm.velocityOverLifetime.x.constantMin - 1.65f) < 0.01f);
         UnityEngine.Assertions.Assert.IsTrue(Mathf.Abs(storm.velocityOverLifetime.z.constantMax + 0.65f) < 0.01f);
         UnityEngine.Assertions.Assert.IsTrue(RenderSettings.ambientGroundColor.maxColorComponent > 0.35f);
@@ -324,7 +353,7 @@ public static class ProjectConfigurator
         foreach (var name in new[] { "SpeedFill", "AltitudeFill", "BatteryFill", "ActionFill" })
             UnityEngine.Assertions.Assert.IsTrue(images.Any(image => image.name == name), name);
         var texts = Object.FindObjectsByType<Text>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (var name in new[] { "SpeedValue", "AltitudeValue", "BatteryValue", "WindValue", "NavigationValue", "WindNeedle", "NavigationNeedle", "ActionLabel" })
+        foreach (var name in new[] { "SpeedValue", "AltitudeValue", "BatteryValue", "WindValue", "NavigationValue", "WindNeedle", "NavigationNeedle", "ActionLabel", "TaskCue" })
             UnityEngine.Assertions.Assert.IsTrue(texts.Any(text => text.name == name), name);
         UnityEngine.Assertions.Assert.IsFalse(images.Single(image => image.name == "ActionIndicator").gameObject.activeSelf);
         UnityEngine.Assertions.Assert.AreEqual(2f, images.Single(image => image.name == "ActionTrack").rectTransform.sizeDelta.y);
@@ -353,16 +382,28 @@ public static class ProjectConfigurator
         moveMenu.Invoke(missions, new object[] { 2 });
         activateMenu.Invoke(missions, null);
         updateDisplay.Invoke(missions, null);
+        var initialAssistProfile = Mathf.Clamp(PlayerPrefs.GetInt("assistProfile", 1), 0, 2);
+        var initialAssistName = drone.AssistProfileName;
         UnityEngine.Assertions.Assert.IsTrue(briefing.text.Contains("SETTINGS") && texts.Single(text => text.name == "MenuButtonLabel1").text.Contains("FLIGHT: ASSIST"));
         activateMenu.Invoke(missions, null);
         UnityEngine.Assertions.Assert.AreEqual(FlightMode.Manual, drone.flightMode);
         activateMenu.Invoke(missions, null);
         UnityEngine.Assertions.Assert.AreEqual(FlightMode.Assist, drone.flightMode);
+        moveMenu.Invoke(missions, new object[] { 1 });
+        updateDisplay.Invoke(missions, null);
+        UnityEngine.Assertions.Assert.IsTrue(texts.Single(text => text.name == "MenuButtonLabel2").text.Contains($"ASSIST: {initialAssistName}"));
+        activateMenu.Invoke(missions, null);
+        UnityEngine.Assertions.Assert.AreNotEqual(initialAssistName, drone.AssistProfileName);
+        drone.SetAssistProfile(initialAssistProfile);
+        PlayerPrefs.SetInt("assistProfile", initialAssistProfile);
+        PlayerPrefs.Save();
         UnityEngine.Assertions.Assert.IsFalse(briefing.text.Contains("THREAT"));
         UnityEngine.Assertions.Assert.AreEqual("01", texts.Single(text => text.name == "BriefingIndex").text);
         CheckPreview(viewer);
         var uiMask = LayerMask.GetMask("UI");
         UnityEngine.Assertions.Assert.IsTrue((fpv.cullingMask & uiMask) != 0);
+        UnityEngine.Assertions.Assert.IsTrue((fpv.cullingMask & (1 << LayerMask.NameToLayer("Ignore Raycast"))) == 0);
+        UnityEngine.Assertions.Assert.IsTrue(drone.GetComponentsInChildren<Renderer>(true).Where(renderer => renderer.name != "EmergencyMedicalPackage").All(renderer => renderer.gameObject.layer == LayerMask.NameToLayer("Ignore Raycast")));
         UnityEngine.Assertions.Assert.IsTrue((viewer.cullingMask & uiMask) != 0);
         UnityEngine.Assertions.Assert.IsFalse(fpv.enabled);
         var hud = GameObject.Find("FpvHud").GetComponent<Canvas>();
@@ -381,6 +422,55 @@ public static class ProjectConfigurator
         UnityEngine.Assertions.Assert.IsFalse(views.missionHud.gameObject.activeSelf);
         UnityEngine.Assertions.Assert.IsFalse(comfortFrame.activeSelf);
         UnityEngine.Assertions.Assert.IsNull(GameObject.Find("FPVMonitor"));
+        var viewUpdate = typeof(ViewController).GetMethod("Update", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var poseLateUpdate = typeof(QuestPoseDriver).GetMethod("LateUpdate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        drone.transform.SetPositionAndRotation(new Vector3(38f, 22f, 44f), Quaternion.Euler(8f, 76f, -6f));
+        typeof(FpvMonitor).GetMethod("UpdateGimbal", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(monitor, null);
+        viewUpdate.Invoke(views, null);
+        poseLateUpdate.Invoke(viewer.GetComponent<QuestPoseDriver>(), null);
+        UnityEngine.Assertions.Assert.IsTrue(Vector3.Distance(viewer.transform.position, monitor.Gimbal.position) < 0.001f, "Desktop FPV camera did not follow the drone");
+        UnityEngine.Assertions.Assert.IsTrue(Quaternion.Angle(viewer.transform.rotation, monitor.Gimbal.rotation) < 0.001f, "Desktop FPV camera did not match gimbal rotation");
+        drone.transform.SetPositionAndRotation(originalDronePosition, originalDroneRotation);
+        typeof(FpvMonitor).GetMethod("UpdateGimbal", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(monitor, null);
+        typeof(MissionController).GetMethod("StartStory", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(missions, null);
+        UnityEngine.Assertions.Assert.AreEqual(8f, drone.maxHorizontalSpeed);
+        typeof(FpvMonitor).GetMethod("UpdateGimbal", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(monitor, null);
+        viewUpdate.Invoke(views, null);
+        poseLateUpdate.Invoke(viewer.GetComponent<QuestPoseDriver>(), null);
+        updateDisplay.Invoke(missions, null);
+        var taskCue = texts.Single(text => text.name == "TaskCue");
+        UnityEngine.Assertions.Assert.IsTrue(taskCue.transform.parent.gameObject.activeSelf && taskCue.text.Contains("ROUTE 1/2"));
+        var distressOffered = typeof(MissionController).GetField("distressOffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var distressAccepted = typeof(MissionController).GetField("distressAccepted", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var distressOfferUntil = typeof(MissionController).GetField("distressOfferUntil", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var actionProgressField = typeof(MissionController).GetField("actionProgress", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        distressOffered.SetValue(missions, true);
+        distressOfferUntil.SetValue(missions, Time.unscaledTime + 5f);
+        updateDisplay.Invoke(missions, null);
+        UnityEngine.Assertions.Assert.IsTrue(taskCue.text.Contains("MAYDAY") && taskCue.text.Contains("RESPOND"));
+        distressOffered.SetValue(missions, false);
+        distressAccepted.SetValue(missions, true);
+        actionProgressField.SetValue(missions, 1.5f);
+        updateDisplay.Invoke(missions, null);
+        UnityEngine.Assertions.Assert.IsTrue(taskCue.text.Contains("RESCUE HOLD") && taskCue.text.Contains("1.5/3.0s"));
+        distressAccepted.SetValue(missions, false);
+        actionProgressField.SetValue(missions, 0f);
+        var routeStepField = typeof(MissionController).GetField("routeStep", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        routeStepField.SetValue(missions, 1);
+        drone.transform.position = missions.missionSites[StoryCatalog.All[0].secondSite].position;
+        typeof(MissionController).GetMethod("UpdateStory", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(missions, new object[] { new QuestInputState() });
+        UnityEngine.Assertions.Assert.AreEqual(StoryStage.Objective, missions.Stage);
+        UnityEngine.Assertions.Assert.IsTrue(missions.rescueTarget.gameObject.activeSelf);
+        UnityEngine.Assertions.Assert.IsTrue(Vector3.Distance(missions.rescueTarget.position, missions.missionSites[StoryCatalog.All[0].targetSite].position) < 3f);
+        typeof(MissionController).GetMethod("CompleteObjective", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(missions, null);
+        UnityEngine.Assertions.Assert.AreEqual(StoryStage.ReturnHome, missions.Stage);
+        UnityEngine.Assertions.Assert.IsTrue(missions.recoveryWindows[0].sharedMaterial.color.maxColorComponent > 0.9f);
+        UnityEngine.Assertions.Assert.IsTrue(rescueMotion.Relieved);
+        UnityEngine.Assertions.Assert.IsTrue((bool)typeof(MissionController).GetField("objectiveComplete", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(missions));
+        CheckPreview(viewer);
+        typeof(MissionController).GetMethod("EnterFreeFlight", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(missions, null);
+        UnityEngine.Assertions.Assert.IsTrue(missions.recoveryWindows[0].sharedMaterial.color.maxColorComponent < 0.3f);
+        UnityEngine.Assertions.Assert.IsFalse((bool)typeof(MissionController).GetField("objectiveComplete", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(missions));
         setMode.Invoke(views, new object[] { ViewMode.Chase });
         UnityEngine.Assertions.Assert.IsTrue(comfortFrame.activeSelf);
         setMode.Invoke(views, new object[] { ViewMode.Operator });

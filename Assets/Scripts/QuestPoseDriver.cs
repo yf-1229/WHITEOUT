@@ -21,7 +21,11 @@ public sealed class QuestPoseDriver : MonoBehaviour
     {
         if (!head.isValid) head = InputDevices.GetDeviceAtXRNode(XRNode.Head);
         if (!head.TryGetFeatureValue(CommonUsages.devicePosition, out var headPosition) ||
-            !head.TryGetFeatureValue(CommonUsages.deviceRotation, out var headRotation)) return;
+            !head.TryGetFeatureValue(CommonUsages.deviceRotation, out var headRotation))
+        {
+            transform.SetPositionAndRotation(trackingOrigin, trackingRotation);
+            return;
+        }
         if (!calibrated)
         {
             initialHeadPosition = headPosition;

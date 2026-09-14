@@ -29,7 +29,8 @@ public sealed class FpvMonitor : MonoBehaviour
         cameraObject.transform.SetParent(transform, false);
         fpvCamera = cameraObject.AddComponent<Camera>();
         fpvCamera.cullingMask |= LayerMask.GetMask("UI");
-        fpvCamera.fieldOfView = 84f;
+        fpvCamera.cullingMask &= ~(1 << LayerMask.NameToLayer("Ignore Raycast"));
+        fpvCamera.fieldOfView = 96f;
         fpvCamera.nearClipPlane = 0.08f;
         fpvCamera.enabled = false;
         feed = new RenderTexture(textureSize, textureSize * 9 / 16, 16, RenderTextureFormat.ARGB32);
