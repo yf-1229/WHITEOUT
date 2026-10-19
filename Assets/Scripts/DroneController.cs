@@ -171,7 +171,22 @@ public sealed class DroneController : MonoBehaviour
             return;
         }
 
-        if (ReturningHome) ApplyReturnHome(dt);
+        if (ReturningHome)
+        {
+            var stickMagnitude = Mathf.Max(left.magnitude, right.magnitude);
+            if (stickMagnitude > 0.25f && homeDistance < geofenceReturnDistance)
+            {
+                ReturningHome = false;
+                if (flightMode == FlightMode.Assist)
+                {
+                    targetAltitude = body.position.y;
+                    targetYaw = transform.eulerAngles.y;
+                }
+                else manualLift = 1f;
+                ApplyFlight(left, right, dt);
+            }
+            else ApplyReturnHome(dt);
+        }
         else ApplyFlight(left, right, dt);
         if (!MotorsArmed) return;
         var gust = 1f + Mathf.Sin(Time.time * 0.73f + body.position.z * 0.04f) * 0.25f;
@@ -291,8 +306,9 @@ public sealed class DroneController : MonoBehaviour
     {
         if (Crashed || collision.relativeVelocity.magnitude < 0.4f) return;
         var impact = collision.relativeVelocity.magnitude;
-        CollisionCount++;
         QuestInput.PulseRight(Mathf.Clamp01(impact / CrashSpeed) * 0.45f, 0.08f);
+        if (impact < 1.2f) return;
+        CollisionCount++;
         if (impact < CrashSpeed) return;
         Crashed = true;
         MotorsArmed = false;

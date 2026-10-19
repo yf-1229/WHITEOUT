@@ -4,7 +4,9 @@ public sealed class FpvMonitor : MonoBehaviour
 {
     public DroneController drone;
     public Renderer[] thermalTargets;
-    public int textureSize = 512;
+    // ponytail: operator-view HUD renders into this feed, so 512 read as mush; 1280 keeps ~16px/deg on the panel
+    // under 72fps. Drop to 1024 if Quest 2 frame time slips, raise to 1920 for 1:1 canvas units.
+    public int textureSize = 1280;
     public float renderInterval = 1f / 30f;
     public Vector3 cameraOffset = new(0f, -0.16f, 0.48f);
     public float cameraTiltDegrees = 8f;
@@ -52,6 +54,18 @@ public sealed class FpvMonitor : MonoBehaviour
         var material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Texture"));
         material.mainTexture = feed;
         panel.GetComponent<Renderer>().sharedMaterial = material;
+
+        // A thin bezel so the feed reads as a physical monitor, not a floating rectangle.
+        var bezel = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        bezel.name = "FPVMonitorBezel";
+        bezel.transform.SetParent(panel.transform, false);
+        bezel.transform.localPosition = new Vector3(0f, 0f, -0.018f);
+        bezel.transform.localScale = new Vector3(1.06f, 1.1f, 1f);
+        Object.Destroy(bezel.GetComponent<Collider>());
+        bezel.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        var bezelMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
+        bezelMaterial.color = new Color(0.018f, 0.022f, 0.028f);
+        bezel.GetComponent<Renderer>().sharedMaterial = bezelMaterial;
     }
 
     private void Update()
@@ -68,6 +82,7 @@ public sealed class FpvMonitor : MonoBehaviour
         if (!thermalAvailable || !QuestInput.Current.leftSecondaryDown) return;
         thermal = !thermal;
         UpdateThermalTarget();
+        QuestInput.PulseRight(0.12f, 0.06f);
     }
 
     private void UpdateGimbal()

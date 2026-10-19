@@ -40,6 +40,8 @@ public sealed class MissionController : MonoBehaviour
     private float actionProgress;
     private float abortConfirmationUntil;
     private float distressOfferUntil;
+    private float jobPenaltyCooldownUntil;
+    private float distressPulseAfter;
     private int routeStep;
     private int jobPenalty;
     private int fieldBonus;
@@ -178,8 +180,12 @@ public sealed class MissionController : MonoBehaviour
         }
         else if (input.leftPrimaryDown)
         {
-            if (State == MissionState.Completed) SelectStory(1);
-            EnterFreeFlight();
+            if (State == MissionState.Completed && SelectedStory < unlockedStory)
+            {
+                SelectStory(1);
+                StartStory();
+            }
+            else EnterFreeFlight();
         }
 
         UpdateDisplay();
@@ -254,6 +260,8 @@ public sealed class MissionController : MonoBehaviour
         routeStep = 0;
         actionProgress = 0f;
         abortConfirmationUntil = 0f;
+        jobPenaltyCooldownUntil = 0f;
+        distressPulseAfter = 0f;
         missionStart = Time.time;
         jobPenalty = 0;
         fieldBonus = 0;
@@ -271,6 +279,15 @@ public sealed class MissionController : MonoBehaviour
         drone.SetFlightMode(selectedMode);
         drone.maxHorizontalSpeed = missionCruiseSpeed;
         drone.BeginMission(homePad.position);
+        var toFirstTarget = missionSites[Story.firstSite].position - drone.transform.position;
+        if (toFirstTarget.sqrMagnitude > 0.01f)
+        {
+            var faceRotation = Quaternion.Euler(0f, Mathf.Atan2(toFirstTarget.x, toFirstTarget.z) * Mathf.Rad2Deg, 0f);
+            drone.transform.rotation = faceRotation;
+            var faceBody = drone.GetComponent<Rigidbody>();
+            if (faceBody != null) faceBody.rotation = faceRotation;
+            if (selectedMode == FlightMode.Assist) drone.SetFlightMode(selectedMode);
+        }
         drone.SetBatteryDrain(MissionModifier == 1 ? 1.35f : 1f);
         drone.SetWind(new Vector3(Story.wind, 0f, -Story.wind * 0.35f));
         fpv.SetThermalAvailable(Story.action == StoryAction.Scan, Story.targetSite);
@@ -302,12 +319,20 @@ public sealed class MissionController : MonoBehaviour
                     jobPenalty += 75;
                     QuestInput.PulseRight(0.2f, 0.35f);
                 }
-                else return;
+                else
+                {
+                    if (Time.unscaledTime >= distressPulseAfter)
+                    {
+                        distressPulseAfter = Time.unscaledTime + 2f;
+                        QuestInput.PulseRight(0.18f, 0.12f);
+                    }
+                    return;
+                }
             }
             if (distressAccepted && !distressCompleted)
             {
                 var distressDistance = Vector3.Distance(drone.transform.position, missionSites[distressSite].position);
-                actionProgress = DistressHoldReady(distressDistance, body.linearVelocity.magnitude) ? actionProgress + Time.deltaTime : 0f;
+                actionProgress = DistressHoldReady(distressDistance, body.linearVelocity.magnitude) ? actionProgress + Time.deltaTime : Mathf.Max(0f, actionProgress - Time.deltaTime * 1.5f);
                 if (actionProgress >= DistressHoldSeconds)
                 {
                     distressCompleted = true;
@@ -344,7 +369,7 @@ public sealed class MissionController : MonoBehaviour
             var close = Vector3.Distance(drone.transform.position, ObjectiveTarget.position) <= 5f;
             var stable = body.linearVelocity.magnitude < 1.6f;
             var sensorReady = Story.action != StoryAction.Scan || fpv.Thermal;
-            actionProgress = Story.holdSeconds <= 0f ? 0f : ActionHoldReady(close, stable, sensorReady) ? actionProgress + Time.deltaTime : 0f;
+            actionProgress = Story.holdSeconds <= 0f ? 0f : ActionHoldReady(close, stable, sensorReady) ? actionProgress + Time.deltaTime : Mathf.Max(0f, actionProgress - Time.deltaTime * 1.5f);
             var held = actionProgress >= Story.holdSeconds;
             if (Story.action == StoryAction.Relay)
             {
@@ -353,7 +378,12 @@ public sealed class MissionController : MonoBehaviour
             else if (input.rightTriggerDown)
             {
                 if (held && sensorReady && ActionReady(Story.action, close, stable, DeliveryReady())) CompleteObjective();
-                else jobPenalty += 100;
+                else if (Time.unscaledTime >= jobPenaltyCooldownUntil)
+                {
+                    jobPenalty += 100;
+                    jobPenaltyCooldownUntil = Time.unscaledTime + 1f;
+                    QuestInput.PulseRight(0.25f, 0.15f);
+                }
             }
             return;
         }
@@ -813,14 +843,16 @@ public sealed class MissionController : MonoBehaviour
             menuButtons[i].gameObject.SetActive(active);
             if (!active) continue;
             var selected = i == menuSelection;
-            menuButtons[i].color = selected ? new Color(1f, 0.3f, 0.08f, 0.94f) : new Color(0.08f, 0.13f, 0.17f, 0.94f);
+            menuButtons[i].color = selected ? new Color(0.2f, 0.09f, 0.04f, 0.95f) : new Color(0.08f, 0.13f, 0.17f, 0.94f);
+            menuButtons[i].transform.Find("ButtonRail").GetComponent<Image>().color = selected ? new Color(1f, 0.35f, 0.08f) : new Color(0.1f, 0.9f, 1f);
             menuButtonTexts[i].text = selected ? $">  {labels[i]}" : labels[i];
+            menuButtonTexts[i].fontStyle = selected ? FontStyle.Bold : FontStyle.Normal;
             menuButtonTexts[i].color = selected ? Color.white : new Color(0.75f, 0.84f, 0.87f);
         }
     }
 
     private static string MissionCard(string channel, string title, string body, string footer)
-        => $"<size=15><color=#81909B>{channel}</color></size>\n<size=32><b>{title}</b></size>\n<size=18>{body}</size>\n<size=14><color=#FF6A2A><b>{footer}</b></color></size>";
+        => $"<size=14><color=#6E828C>{channel}</color></size>\n<size=32><b>{title}</b></size>\n<size=18>{body}</size>\n<size=13><color=#FF6A2A><b>{footer}</b></color></size>";
 
     private string ActionPrompt()
     {

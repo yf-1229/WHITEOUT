@@ -825,6 +825,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         thermalOverlay.enabled = false;
 
         var statusPanel = UiImage(missionCanvas.transform, "OperationsMenu", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(38f, -38f), new Vector2(790f, 340f), new Color(0.012f, 0.018f, 0.024f, 0.86f), new Vector2(0f, 1f));
+        Frame(statusPanel, new Color(1f, 1f, 1f, 0.16f));
         UiImage(statusPanel.transform, "BriefingHeader", new Vector2(0f, 1f), new Vector2(1f, 1f), Vector2.zero, new Vector2(0f, 6f), Orange, new Vector2(0.5f, 1f));
         var accent = UiImage(statusPanel.transform, "BriefingRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(5f, 0f), Cyan, new Vector2(0f, 0.5f));
         accent.rectTransform.sizeDelta = new Vector2(5f, 0f);
@@ -845,6 +846,7 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         for (var i = 0; i < menuButtons.Length; i++)
         {
             var button = UiImage(statusPanel.transform, $"MenuButton{i + 1}", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-22f, -52f - i * 66f), new Vector2(278f, 52f), new Color(0.08f, 0.13f, 0.17f, 0.94f), new Vector2(1f, 1f));
+            Frame(button, new Color(1f, 1f, 1f, 0.12f));
             UiImage(button.transform, "ButtonRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 0f), Cyan, new Vector2(0f, 0.5f));
             var label = UiText(button.transform, $"MenuButtonLabel{i + 1}", 18, Color.white, TextAnchor.MiddleLeft);
             label.rectTransform.offsetMin = new Vector2(18f, 0f);
@@ -854,11 +856,13 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         }
 
         var alertPanel = UiImage(canvas.transform, "AlertBar", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -86f), new Vector2(560f, 52f), new Color(0.14f, 0.025f, 0.015f, 0.88f), new Vector2(0.5f, 1f));
+        Frame(alertPanel, new Color(1f, 0.45f, 0.25f, 0.35f));
         telemetry = UiText(alertPanel.transform, "Telemetry", 28, Orange, TextAnchor.MiddleCenter);
         telemetry.rectTransform.offsetMin = new Vector2(12f, 5f);
         telemetry.rectTransform.offsetMax = new Vector2(-12f, -5f);
 
         var taskPanel = UiImage(canvas.transform, "TaskCuePanel", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(700f, 52f), new Color(0.008f, 0.014f, 0.02f, 0.82f), new Vector2(0.5f, 1f));
+        Frame(taskPanel, new Color(1f, 1f, 1f, 0.12f));
         UiImage(taskPanel.transform, "TaskCueRail", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 0f), Cyan, new Vector2(0f, 0.5f));
         var taskCue = UiText(taskPanel.transform, "TaskCue", 24, new Color(0.9f, 0.95f, 0.97f), TextAnchor.MiddleCenter);
         taskCue.rectTransform.offsetMin = new Vector2(16f, 2f);
@@ -940,8 +944,9 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         var obj = new GameObject(name);
         obj.transform.SetParent(parent, false);
         var text = obj.AddComponent<Text>();
-        text.font = Font.CreateDynamicFontFromOSFont(new[] { "Noto Sans CJK JP", "Noto Sans JP", "Arial" }, size) ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.font = HudFont();
         text.fontSize = size;
+        text.lineSpacing = 1.12f;
         text.color = color;
         text.alignment = alignment;
         text.horizontalOverflow = HorizontalWrapMode.Wrap;
@@ -950,6 +955,25 @@ public sealed class PrototypeBootstrap : MonoBehaviour
         text.rectTransform.anchorMin = Vector2.zero;
         text.rectTransform.anchorMax = Vector2.one;
         return text;
+    }
+
+    // One shared dynamic OS font: per-label Font instances each rebuilt their own glyph atlas,
+    // which cost memory and rasterised at inconsistent sizes.
+    private static Font hudFont;
+
+    private static Font HudFont() => hudFont != null
+        ? hudFont
+        : hudFont = Font.CreateDynamicFontFromOSFont(new[] { "Noto Sans CJK JP", "Noto Sans JP", "Arial" }, 32)
+            ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+
+    // Hairline frame around a panel: four edge bars, so the panel keeps its own colour for
+    // selection states and still reads as a machined plate instead of a flat sticker.
+    private static void Frame(Image panel, Color borderColor, float thickness = 1.5f)
+    {
+        UiImage(panel.transform, "FrameTop", new Vector2(0f, 1f), new Vector2(1f, 1f), Vector2.zero, new Vector2(0f, thickness), borderColor, new Vector2(0.5f, 1f));
+        UiImage(panel.transform, "FrameBottom", new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, thickness), borderColor, new Vector2(0.5f, 0f));
+        UiImage(panel.transform, "FrameLeft", new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(thickness, 0f), borderColor, new Vector2(0f, 0.5f));
+        UiImage(panel.transform, "FrameRight", new Vector2(1f, 0f), new Vector2(1f, 1f), Vector2.zero, new Vector2(thickness, 0f), borderColor, new Vector2(1f, 0.5f));
     }
 
     private static void Gauge(Transform parent, string name, string labelText, Vector2 anchor, Vector2 position, Vector2 pivot, Color color)
